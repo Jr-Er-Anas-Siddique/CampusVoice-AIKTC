@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1058473394038",
+    "project_id": "campusvoice-aiktc-44e13",
+    "storage_bucket": "campusvoice-aiktc-44e13.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1058473394038:android:75232797b1e11aab120457",
+        "android_client_info": {
+          "package_name": "com.example.mobile_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAs17rjldFI7UV2dsoDV8024tyzXNMDdc0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
