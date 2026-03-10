@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'features/auth/presentation/pages/login_page.dart';
+import 'features/posts/presentation/pages/report_issue_page.dart';
 // import 'features/auth/presentation/pages/verify_email_page.dart';
 
 void main() async {
@@ -89,17 +90,33 @@ class HomePage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.campaign_rounded,
-                size: 64, color: Color(0xFF1A237E)),
+            const Icon(
+              Icons.campaign_rounded,
+              size: 64,
+              color: Color(0xFF1A237E),
+            ),
             const SizedBox(height: 16),
             Text(
               'Welcome, ${user?.displayName ?? 'Student'}!',
-              style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            Text(user?.email ?? '',
-                style: const TextStyle(color: Colors.grey)),
+            Text(user?.email ?? '', style: const TextStyle(color: Colors.grey)),
+
+            const SizedBox(height: 24),
+
+            ElevatedButton.icon(
+              icon: const Icon(Icons.report_problem_outlined),
+              label: const Text("Report Issue"),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ReportIssuePage(),
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -131,7 +148,11 @@ class _SplashScreen extends StatelessWidget {
             ),
             Text(
               'AIKTC',
-              style: TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 4),
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+                letterSpacing: 4,
+              ),
             ),
             SizedBox(height: 40),
             CircularProgressIndicator(color: Colors.white54),

@@ -1,39 +1,68 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/post_model.dart
 
-// ---------------------------------------------------------------------------
-// Enums
-// ---------------------------------------------------------------------------
+enum ComplaintStatus { draft, submitted, inProgress, resolved, rejected }
 
-enum PostStatus { pending, under_review, in_progress, resolved }
+enum ComplaintCategory {
+  infrastructure,
+  academic,
+  administrative,
+  safety,
+  other,
+}
 
-enum PostVisibility { public, private }
+extension ComplaintCategoryExt on ComplaintCategory {
+  String get label {
+    switch (this) {
+      case ComplaintCategory.infrastructure:
+        return 'Infrastructure';
+      case ComplaintCategory.academic:
+        return 'Academic';
+      case ComplaintCategory.administrative:
+        return 'Administrative';
+      case ComplaintCategory.safety:
+        return 'Safety';
+      case ComplaintCategory.other:
+        return 'Other';
+    }
+  }
 
-enum AssignedCommittee { GARC, IPDC, KRRC }
+  String get icon {
+    switch (this) {
+      case ComplaintCategory.infrastructure:
+        return '🏗️';
+      case ComplaintCategory.academic:
+        return '📚';
+      case ComplaintCategory.administrative:
+        return '📋';
+      case ComplaintCategory.safety:
+        return '🛡️';
+      case ComplaintCategory.other:
+        return '📌';
+    }
+  }
+}
 
-enum ComplaintCategory { infrastructure, academic, administrative, safety, other }
-
-// ---------------------------------------------------------------------------
-// Supporting model: GPS location (for infrastructure complaints)
-// ---------------------------------------------------------------------------
-
-class GpsLocation {
+class GpsCoordinates {
   final double latitude;
   final double longitude;
-  final double? accuracy; // metres
+  final double? accuracy;
 
-  const GpsLocation({
+  const GpsCoordinates({
     required this.latitude,
     required this.longitude,
     this.accuracy,
   });
 
-  Map<String, dynamic> toMap() => {
-        'latitude': latitude,
-        'longitude': longitude,
-        if (accuracy != null) 'accuracy': accuracy,
-      };
+  Map<String, dynamic> toMap() {
+  final map = <String, dynamic>{
+    'latitude': latitude,
+    'longitude': longitude,
+  };
+  if (accuracy != null) map['accuracy'] = accuracy;
+  return map;
+}
 
-  factory GpsLocation.fromMap(Map<String, dynamic> map) => GpsLocation(
+  factory GpsCoordinates.fromMap(Map<String, dynamic> map) => GpsCoordinates(
         latitude: (map['latitude'] as num).toDouble(),
         longitude: (map['longitude'] as num).toDouble(),
         accuracy: map['accuracy'] != null
@@ -42,272 +71,209 @@ class GpsLocation {
       );
 }
 
-// ---------------------------------------------------------------------------
-// PostModel
-// ---------------------------------------------------------------------------
-
 class PostModel {
-  // ── Identity ────────────────────────────────────────────────────────────
-  /// Firestore document ID — empty string before the document is persisted.
-  final String id;
+  final String? id;
+  final String userId;
+  final String userEmail;
+  final String userName;
 
-  // ── Author ───────────────────────────────────────────────────────────────
-  final String authorId; // Firebase Auth UID
-  final String authorName; // display name at time of posting
-  final String? authorAvatarUrl;
-
-  // ── Content ──────────────────────────────────────────────────────────────
+  // Core fields
   final String title;
   final String description;
   final ComplaintCategory category;
 
-  /// Cloud Storage download URLs for attached evidence images.
-  final List<String> imageUrls;
+  // Location
+  final String building;
+  final String? floor;
+  final String? roomNumber;
 
-  // ── Location ─────────────────────────────────────────────────────────────
-  final String building; // e.g. "Main Block", "Library"
-  final String floor; // e.g. "Ground", "1st", "Terrace"
+  // Media
+  final List<String> imageUrls; // Firebase Storage URLs
+  final List<String> localImagePaths; // local paths (draft only)
 
-  /// Required and verified when [category] == ComplaintCategory.infrastructure.
-  final GpsLocation? gpsLocation;
+  // GPS
+  final GpsCoordinates? gpsCoordinates;
+  final bool? isOnCampus;
 
-  /// True once the GPS co-ordinates have been server-side verified.
-  final bool isGpsVerified;
+  // Status
+  final ComplaintStatus status;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 
-  // ── Visibility & Assignment ───────────────────────────────────────────────
-  final PostVisibility visibility;
-
-  /// Auto-assigned by a Cloud Function / service layer based on [category].
-  final AssignedCommittee assignedCommittee;
-
-  // ── Status ───────────────────────────────────────────────────────────────
-  final PostStatus status;
-
-  /// UID of the committee member who last updated the status.
-  final String? resolvedById;
-
-  /// Optional note left by the resolver / reviewer.
-  final String? statusNote;
-
-  // ── Social counters ───────────────────────────────────────────────────────
-  /// Number of users who have "supported" (up-voted) this post.
-  final int supportCount;
-
-  /// Denormalised count kept in sync with the sub-collection.
-  final int commentCount;
-
-  // ── Timestamps ───────────────────────────────────────────────────────────
-  /// Set by the server via FieldValue.serverTimestamp() on first write.
-  final DateTime? createdAt;
-
-  /// Updated every time any field changes.
-  final DateTime? updatedAt;
-
-  // ── Constructor ───────────────────────────────────────────────────────────
   const PostModel({
-    this.id = '',
-    required this.authorId,
-    required this.authorName,
-    this.authorAvatarUrl,
+    this.id,
+    required this.userId,
+    required this.userEmail,
+    required this.userName,
     required this.title,
     required this.description,
     required this.category,
-    this.imageUrls = const [],
     required this.building,
-    required this.floor,
-    this.gpsLocation,
-    this.isGpsVerified = false,
-    this.visibility = PostVisibility.public,
-    required this.assignedCommittee,
-    this.status = PostStatus.pending,
-    this.resolvedById,
-    this.statusNote,
-    this.supportCount = 0,
-    this.commentCount = 0,
-    this.createdAt,
-    this.updatedAt,
+    this.floor,
+    this.roomNumber,
+    this.imageUrls = const [],
+    this.localImagePaths = const [],
+    this.gpsCoordinates,
+    this.isOnCampus,
+    this.status = ComplaintStatus.draft,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
-  // ── toMap ─────────────────────────────────────────────────────────────────
-  /// Converts the model to a Firestore-compatible map.
-  ///
-  /// Pass [isNew] = true on initial creation so that [createdAt] is written
-  /// with a server timestamp; subsequent updates only touch [updatedAt].
-  Map<String, dynamic> toMap({bool isNew = false}) {
-    return {
-      // Identity — 'id' is stored in the document path, not the body.
-      'authorId': authorId,
-      'authorName': authorName,
-      if (authorAvatarUrl != null) 'authorAvatarUrl': authorAvatarUrl,
+  bool get isDraft => status == ComplaintStatus.draft;
+  bool get isOutdoor => _outdoorLocations.contains(building);
 
-      // Content
-      'title': title,
-      'description': description,
-      'category': category.name,
-      'imageUrls': imageUrls,
+  static const List<String> _outdoorLocations = [
+    'Ground',
+    'Parking Area',
+    'Campus Roads',
+    'Backyard Area',
+  ];
 
-      // Location
-      'building': building,
-      'floor': floor,
-      if (gpsLocation != null) 'gpsLocation': gpsLocation!.toMap(),
-      'isGpsVerified': isGpsVerified,
-
-      // Visibility & assignment
-      'visibility': visibility.name,
-      'assignedCommittee': assignedCommittee.name,
-
-      // Status
-      'status': status.name,
-      if (resolvedById != null) 'resolvedById': resolvedById,
-      if (statusNote != null) 'statusNote': statusNote,
-
-      // Counters
-      'supportCount': supportCount,
-      'commentCount': commentCount,
-
-      // Timestamps — always use server timestamps for accuracy.
-      if (isNew) 'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-  }
-
-  // ── fromMap factory ───────────────────────────────────────────────────────
-  /// Reconstructs a [PostModel] from a Firestore document snapshot.
-  factory PostModel.fromMap(Map<String, dynamic> map, {String id = ''}) {
-    return PostModel(
-      id: id,
-
-      authorId: map['authorId'] as String? ?? '',
-      authorName: map['authorName'] as String? ?? '',
-      authorAvatarUrl: map['authorAvatarUrl'] as String?,
-
-      title: map['title'] as String? ?? '',
-      description: map['description'] as String? ?? '',
-      category: ComplaintCategory.values.firstWhere(
-        (e) => e.name == map['category'],
-        orElse: () => ComplaintCategory.other,
-      ),
-      imageUrls: List<String>.from(map['imageUrls'] as List? ?? []),
-
-      building: map['building'] as String? ?? '',
-      floor: map['floor'] as String? ?? '',
-      gpsLocation: map['gpsLocation'] != null
-          ? GpsLocation.fromMap(
-              Map<String, dynamic>.from(map['gpsLocation'] as Map))
-          : null,
-      isGpsVerified: map['isGpsVerified'] as bool? ?? false,
-
-      visibility: PostVisibility.values.firstWhere(
-        (e) => e.name == map['visibility'],
-        orElse: () => PostVisibility.public,
-      ),
-      assignedCommittee: AssignedCommittee.values.firstWhere(
-        (e) => e.name == map['assignedCommittee'],
-        orElse: () => AssignedCommittee.GARC,
-      ),
-
-      status: PostStatus.values.firstWhere(
-        (e) => e.name == map['status'],
-        orElse: () => PostStatus.pending,
-      ),
-      resolvedById: map['resolvedById'] as String?,
-      statusNote: map['statusNote'] as String?,
-
-      supportCount: (map['supportCount'] as num?)?.toInt() ?? 0,
-      commentCount: (map['commentCount'] as num?)?.toInt() ?? 0,
-
-      // Firestore returns Timestamps; handle both Timestamp and DateTime.
-      createdAt: _toDateTime(map['createdAt']),
-      updatedAt: _toDateTime(map['updatedAt']),
-    );
-  }
-
-  // ── fromSnapshot convenience ──────────────────────────────────────────────
-  /// Convenience factory that pulls the document ID automatically.
-  factory PostModel.fromSnapshot(DocumentSnapshot<Map<String, dynamic>> snap) {
-    return PostModel.fromMap(snap.data() ?? {}, id: snap.id);
-  }
-
-  // ── copyWith ──────────────────────────────────────────────────────────────
   PostModel copyWith({
     String? id,
-    String? authorId,
-    String? authorName,
-    String? authorAvatarUrl,
+    String? userId,
+    String? userEmail,
+    String? userName,
     String? title,
     String? description,
     ComplaintCategory? category,
-    List<String>? imageUrls,
     String? building,
     String? floor,
-    GpsLocation? gpsLocation,
-    bool? isGpsVerified,
-    PostVisibility? visibility,
-    AssignedCommittee? assignedCommittee,
-    PostStatus? status,
-    String? resolvedById,
-    String? statusNote,
-    int? supportCount,
-    int? commentCount,
+    String? roomNumber,
+    List<String>? imageUrls,
+    List<String>? localImagePaths,
+    GpsCoordinates? gpsCoordinates,
+    bool? isOnCampus,
+    ComplaintStatus? status,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
     return PostModel(
       id: id ?? this.id,
-      authorId: authorId ?? this.authorId,
-      authorName: authorName ?? this.authorName,
-      authorAvatarUrl: authorAvatarUrl ?? this.authorAvatarUrl,
+      userId: userId ?? this.userId,
+      userEmail: userEmail ?? this.userEmail,
+      userName: userName ?? this.userName,
       title: title ?? this.title,
       description: description ?? this.description,
       category: category ?? this.category,
-      imageUrls: imageUrls ?? this.imageUrls,
       building: building ?? this.building,
       floor: floor ?? this.floor,
-      gpsLocation: gpsLocation ?? this.gpsLocation,
-      isGpsVerified: isGpsVerified ?? this.isGpsVerified,
-      visibility: visibility ?? this.visibility,
-      assignedCommittee: assignedCommittee ?? this.assignedCommittee,
+      roomNumber: roomNumber ?? this.roomNumber,
+      imageUrls: imageUrls ?? this.imageUrls,
+      localImagePaths: localImagePaths ?? this.localImagePaths,
+      gpsCoordinates: gpsCoordinates ?? this.gpsCoordinates,
+      isOnCampus: isOnCampus ?? this.isOnCampus,
       status: status ?? this.status,
-      resolvedById: resolvedById ?? this.resolvedById,
-      statusNote: statusNote ?? this.statusNote,
-      supportCount: supportCount ?? this.supportCount,
-      commentCount: commentCount ?? this.commentCount,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  /// Whether GPS verification is required for this post.
-  bool get requiresGps => category == ComplaintCategory.infrastructure;
+  // Firestore serialization
+  Map<String, dynamic> toFirestore() {
+  final map = <String, dynamic>{
+    'userId': userId,
+    'userEmail': userEmail,
+    'userName': userName,
+    'title': title,
+    'description': description,
+    'category': category.name,
+    'building': building,
+    'status': status.name,
+    'imageUrls': imageUrls,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
-  /// Friendly label used in the UI.
-  String get statusLabel {
-    switch (status) {
-      case PostStatus.pending:
-        return 'Pending';
-      case PostStatus.under_review:
-        return 'Under Review';
-      case PostStatus.in_progress:
-        return 'In Progress';
-      case PostStatus.resolved:
-        return 'Resolved';
-    }
-  }
+  // Only add optional fields if they have values
+  if (floor != null) map['floor'] = floor;
+  if (roomNumber != null) map['roomNumber'] = roomNumber;
+  if (isOnCampus != null) map['isOnCampus'] = isOnCampus;
+  if (gpsCoordinates != null) map['gpsCoordinates'] = gpsCoordinates!.toMap();
 
-  @override
-  String toString() =>
-      'PostModel(id: $id, title: $title, status: ${status.name}, '
-      'committee: ${assignedCommittee.name})';
+  return map;
 }
 
-// ---------------------------------------------------------------------------
-// Private helper
-// ---------------------------------------------------------------------------
+  factory PostModel.fromFirestore(Map<String, dynamic> map, String docId) {
+    return PostModel(
+      id: docId,
+      userId: map['userId'] ?? '',
+      userEmail: map['userEmail'] ?? '',
+      userName: map['userName'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      category: ComplaintCategory.values.firstWhere(
+        (e) => e.name == map['category'],
+        orElse: () => ComplaintCategory.other,
+      ),
+      building: map['building'] ?? '',
+      floor: map['floor'],
+      roomNumber: map['roomNumber'],
+      imageUrls: List<String>.from(map['imageUrls'] ?? []),
+      gpsCoordinates: map['gpsCoordinates'] != null
+          ? GpsCoordinates.fromMap(
+              Map<String, dynamic>.from(map['gpsCoordinates']))
+          : null,
+      isOnCampus: map['isOnCampus'],
+      status: ComplaintStatus.values.firstWhere(
+        (e) => e.name == map['status'],
+        orElse: () => ComplaintStatus.draft,
+      ),
+      createdAt: DateTime.parse(map['createdAt']),
+      updatedAt: DateTime.parse(map['updatedAt']),
+    );
+  }
 
-DateTime? _toDateTime(dynamic value) {
-  if (value == null) return null;
-  if (value is Timestamp) return value.toDate();
-  if (value is DateTime) return value;
-  return null;
+  // SharedPreferences / local draft serialization
+  Map<String, dynamic> toDraftMap() => {
+        'id': id,
+        'userId': userId,
+        'userEmail': userEmail,
+        'userName': userName,
+        'title': title,
+        'description': description,
+        'category': category.name,
+        'building': building,
+        'floor': floor,
+        'roomNumber': roomNumber,
+        'imageUrls': imageUrls,
+        'localImagePaths': localImagePaths,
+        'gpsCoordinates': gpsCoordinates?.toMap(),
+        'isOnCampus': isOnCampus,
+        'status': status.name,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+      };
+
+  factory PostModel.fromDraftMap(Map<String, dynamic> map) {
+    return PostModel(
+      id: map['id'],
+      userId: map['userId'] ?? '',
+      userEmail: map['userEmail'] ?? '',
+      userName: map['userName'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      category: ComplaintCategory.values.firstWhere(
+        (e) => e.name == map['category'],
+        orElse: () => ComplaintCategory.other,
+      ),
+      building: map['building'] ?? '',
+      floor: map['floor'],
+      roomNumber: map['roomNumber'],
+      imageUrls: List<String>.from(map['imageUrls'] ?? []),
+      localImagePaths: List<String>.from(map['localImagePaths'] ?? []),
+      gpsCoordinates: map['gpsCoordinates'] != null
+          ? GpsCoordinates.fromMap(
+              Map<String, dynamic>.from(map['gpsCoordinates']))
+          : null,
+      isOnCampus: map['isOnCampus'],
+      status: ComplaintStatus.values.firstWhere(
+        (e) => e.name == map['status'],
+        orElse: () => ComplaintStatus.draft,
+      ),
+      createdAt: DateTime.parse(map['createdAt']),
+      updatedAt: DateTime.parse(map['updatedAt']),
+    );
+  }
 }

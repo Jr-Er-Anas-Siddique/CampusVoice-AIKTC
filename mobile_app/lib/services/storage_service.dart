@@ -1,28 +1,54 @@
+// lib/services/storage_service.dart
+
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 
 class StorageService {
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  StorageService._();
+  static final StorageService instance = StorageService._();
 
-  /// Uploads an image to Firebase Storage and returns the download URL
-  Future<String?> uploadPostImage(File imageFile, String postId) async {
-    try {
-      // Storage path
-      final Reference ref = _storage.ref().child('posts/$postId.jpg');
+  /// Copies image files to app's permanent local storage.
+  /// Returns list of permanent local file paths.
+  Future<List<String>> uploadComplaintImages({
+    required String userId,
+    required String complaintId,
+    required List<File> files,
+  }) async {
+    if (files.isEmpty) return [];
 
-      // Upload file
-      UploadTask uploadTask = ref.putFile(imageFile);
+    final appDir = await getApplicationDocumentsDirectory();
+    final complaintDir = Directory(
+      p.join(appDir.path, 'complaints', userId, complaintId),
+    );
+    await complaintDir.create(recursive: true);
 
-      // Wait for completion
-      TaskSnapshot snapshot = await uploadTask;
+    final List<String> savedPaths = [];
 
-      // Get download URL
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-
-      return downloadUrl;
-    } catch (e) {
-      print("Image upload failed: $e");
-      return null;
+    for (int i = 0; i < files.length; i++) {
+      final ext = p.extension(files[i].path);
+      final fileName = 'image_$i$ext';
+      final destPath = p.join(complaintDir.path, fileName);
+      await files[i].copy(destPath);
+      savedPaths.add(destPath);
     }
+
+    return savedPaths;
+  }
+
+  /// Deletes locally stored images for a complaint.
+  Future<void> deleteComplaintImages({
+    required String userId,
+    required String complaintId,
+  }) async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final complaintDir = Directory(
+        p.join(appDir.path, 'complaints', userId, complaintId),
+      );
+      if (await complaintDir.exists()) {
+        await complaintDir.delete(recursive: true);
+      }
+    } catch (_) {}
   }
 }
