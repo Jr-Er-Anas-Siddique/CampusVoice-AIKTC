@@ -1,20 +1,20 @@
+// lib/main.dart
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
-import 'services/auth_service.dart';
 import 'features/auth/presentation/pages/login_page.dart';
-import 'features/posts/presentation/pages/report_issue_page.dart';
-// import 'features/auth/presentation/pages/verify_email_page.dart';
+import 'features/feed/presentation/pages/feed_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+  runApp(const CampusVoiceApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class CampusVoiceApp extends StatelessWidget {
+  const CampusVoiceApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -22,9 +22,9 @@ class MyApp extends StatelessWidget {
       title: 'CampusVoice AIKTC',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF1A237E),
-        scaffoldBackgroundColor: Colors.grey[50],
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A237E)),
         useMaterial3: true,
+        fontFamily: 'Roboto',
       ),
       home: const AuthGate(),
     );
@@ -37,89 +37,16 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: AuthService.instance.authStateChanges,
-      builder: (ctx, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const _SplashScreen();
         }
-
-        final user = snap.data;
-
-        // Signed in → Home (no email verification check)
-        if (user != null) {
-          return const HomePage();
+        if (snapshot.hasData && snapshot.data != null) {
+          return const FeedPage();
         }
-
-        // Not signed in → Login
         return const LoginPage();
       },
-    );
-  }
-}
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final user = AuthService.instance.currentUser;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('CampusVoice AIKTC'),
-        backgroundColor: const Color(0xFF1A237E),
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () async {
-              await AuthService.instance.signOut();
-              // Force navigate to LoginPage — don't rely on stream
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                  (route) => false,
-                );
-              }
-            },
-          ),
-        ],
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.campaign_rounded,
-              size: 64,
-              color: Color(0xFF1A237E),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Welcome, ${user?.displayName ?? 'Student'}!',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(user?.email ?? '', style: const TextStyle(color: Colors.grey)),
-
-            const SizedBox(height: 24),
-
-            ElevatedButton.icon(
-              icon: const Icon(Icons.report_problem_outlined),
-              label: const Text("Report Issue"),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const ReportIssuePage(),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -133,10 +60,10 @@ class _SplashScreen extends StatelessWidget {
       backgroundColor: Color(0xFF1A237E),
       body: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.campaign_rounded, size: 72, color: Colors.white),
-            SizedBox(height: 20),
+            Icon(Icons.campaign_rounded, color: Colors.white, size: 64),
+            SizedBox(height: 16),
             Text(
               'CampusVoice',
               style: TextStyle(
@@ -146,16 +73,17 @@ class _SplashScreen extends StatelessWidget {
                 letterSpacing: 1,
               ),
             ),
+            SizedBox(height: 8),
             Text(
               'AIKTC',
               style: TextStyle(
-                color: Colors.white70,
+                color: Colors.white60,
                 fontSize: 14,
-                letterSpacing: 4,
+                letterSpacing: 3,
               ),
             ),
             SizedBox(height: 40),
-            CircularProgressIndicator(color: Colors.white54),
+            CircularProgressIndicator(color: Colors.white),
           ],
         ),
       ),

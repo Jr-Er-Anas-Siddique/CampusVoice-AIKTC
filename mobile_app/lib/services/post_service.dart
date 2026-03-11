@@ -27,7 +27,9 @@ class PostService {
 
   /// Uploads images then submits complaint to Firestore.
   /// Returns the saved [PostModel] with Firestore ID and image URLs.
-  Future<PostModel> submitComplaint({
+  // lib/services/post_service.dart
+
+Future<PostModel> submitComplaint({
   required PostModel post,
   required List<File> imageFiles,
 }) async {
@@ -35,7 +37,7 @@ class PostService {
     final docRef = _firestore.collection('complaints').doc();
     final complaintId = docRef.id;
 
-    // Convert images to Base64
+    // In lib/services/post_service.dart
     List<String> imageUrls = [];
     if (imageFiles.isNotEmpty) {
       imageUrls = await StorageService.instance.uploadComplaintImages(
@@ -43,27 +45,25 @@ class PostService {
         complaintId: complaintId,
         files: imageFiles,
       );
+      
+      // ADD THIS CHECK:
+      if (imageUrls.isEmpty) {
+         throw PostException('Images selected but failed to upload. Check terminal for errors.');
+      }
     }
 
     final submitted = post.copyWith(
       id: complaintId,
       imageUrls: imageUrls,
-      localImagePaths: [],
       status: ComplaintStatus.submitted,
       updatedAt: DateTime.now(),
     );
 
-    // toFirestore() never includes localImagePaths — safe to write
     await docRef.set(submitted.toFirestore());
-
-    if (post.id != null) {
-      await deleteDraft(post.id!);
-    }
-
     return submitted;
   } catch (e) {
-    if (e is PostException) rethrow;
-    throw PostException('Failed to submit complaint: $e');
+    print('DEBUG: Submission Error: $e');
+    throw PostException('Failed to submit: $e');
   }
 }
 

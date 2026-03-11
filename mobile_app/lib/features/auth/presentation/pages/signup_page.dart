@@ -1,6 +1,7 @@
 // lib/features/auth/presentation/pages/signup_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
 // import 'package:mobile_app/features/auth/presentation/pages/verify_email_page.dart';
 import '../../../../services/auth_service.dart';
 import 'login_page.dart';
@@ -64,7 +65,7 @@ class _SignupPageState extends State<SignupPage> {
       if (!mounted) return;
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        MaterialPageRoute(builder: (_) => const FeedPage()),
           (route) => false
       );
     } on AuthException catch (e) {

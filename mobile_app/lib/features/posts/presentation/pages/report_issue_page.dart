@@ -1,28 +1,20 @@
-// lib/features/report/presentation/pages/report_issue_page.dart
-//
-// Design matches login/signup pages:
-// Primary: Color(0xFF1A237E), Background: Color(0xFFF5F7FF)
-// Cards: white, borderRadius 20, shadow indigo 0.08
-// Inputs: fillColor 0xFFF8F9FF, borderRadius 12, focused border 1A237E
-// Buttons: height 52, borderRadius 14, backgroundColor 1A237E
+// lib/features/posts/presentation/pages/report_issue_page.dart
 
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:video_player/video_player.dart';
 import '../../../../models/post_model.dart';
 import '../../../../services/post_service.dart';
+import '../../../../services/storage_service.dart';
 import '../../../../config/campus_locations.dart';
 import '../../../../config/complaint_categories.dart';
 import '../../../../core/utils/campus_boundary.dart';
-
-// Replace with your actual auth service import
 import '../../../../services/auth_service.dart';
 
 class ReportIssuePage extends StatefulWidget {
-  /// Pass an existing draft to edit it, or null to create new.
   final PostModel? existingDraft;
-
   const ReportIssuePage({super.key, this.existingDraft});
 
   @override
@@ -35,14 +27,22 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   final _descriptionController = TextEditingController();
   final _roomController = TextEditingController();
 
-  // Selections
   ComplaintCategory? _selectedCategory;
   String? _selectedBuilding;
   String? _selectedFloor;
 
-  // Images
+  // Media — shared pool of 3 slots total
+  static const int _totalMediaSlots = 3;
   final List<File> _selectedImages = [];
-  static const int _maxImages = 3;
+  final List<File> _selectedVideos = [];
+  final List<VideoPlayerController?> _videoControllers = [];
+  final List<bool> _videoInitializing = [];
+
+  // Computed limits
+  int get _usedSlots => _selectedImages.length + _selectedVideos.length;
+  int get _remainingSlots => _totalMediaSlots - _usedSlots;
+  int get _maxMoreImages => _remainingSlots;
+  int get _maxMoreVideos => _remainingSlots;
 
   // GPS
   GpsCoordinates? _gpsCoordinates;
@@ -51,6 +51,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   String? _gpsError;
 
   // State
+  bool _isPublic = true; // default public
   bool _isSubmitting = false;
   bool _isSavingDraft = false;
   String? _errorMessage;
@@ -64,7 +65,6 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   void _populateFromDraft() {
     final draft = widget.existingDraft;
     if (draft == null) return;
-
     _titleController.text = draft.title;
     _descriptionController.text = draft.description;
     _roomController.text = draft.roomNumber ?? '';
@@ -73,6 +73,29 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     _selectedFloor = draft.floor;
     _gpsCoordinates = draft.gpsCoordinates;
     _isOnCampus = draft.isOnCampus;
+    _isPublic = draft.isPublic;
+
+    // Load existing draft videos
+    for (final path in draft.videoPaths) {
+      final file = File(path);
+      if (file.existsSync()) {
+        final index = _selectedVideos.length;
+        _selectedVideos.add(file);
+        _videoControllers.add(null);
+        _videoInitializing.add(false);
+        _initVideoController(index, file);
+      }
+    }
+  }
+
+  Future<void> _initVideoController(int index, File file) async {
+    if (index >= _videoControllers.length) return;
+    setState(() => _videoInitializing[index] = true);
+    await _videoControllers[index]?.dispose();
+    final controller = VideoPlayerController.file(file);
+    _videoControllers[index] = controller;
+    await controller.initialize();
+    if (mounted) setState(() => _videoInitializing[index] = false);
   }
 
   @override
@@ -80,10 +103,13 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     _titleController.dispose();
     _descriptionController.dispose();
     _roomController.dispose();
+    for (final c in _videoControllers) {
+      c?.dispose();
+    }
     super.dispose();
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   bool get _isOutdoor =>
       _selectedBuilding != null &&
@@ -99,21 +125,19 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
 
   bool get _gpsVerified => _gpsCoordinates != null && _isOnCampus == true;
 
-  // ─── GPS ──────────────────────────────────────────────────────────────────
+  // ── GPS ───────────────────────────────────────────────────────────────────
 
   Future<void> _captureGps() async {
     setState(() {
       _isCapturingGps = true;
       _gpsError = null;
     });
-
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        setState(() => _gpsError = 'Location services are disabled. Please enable GPS.');
+        setState(() => _gpsError = 'Location services are disabled.');
         return;
       }
-
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -122,32 +146,26 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
           return;
         }
       }
-
       if (permission == LocationPermission.deniedForever) {
-        setState(() =>
-            _gpsError = 'Location permission permanently denied. Enable in settings.');
+        setState(() => _gpsError = 'Location permission permanently denied.');
         return;
       }
-
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
-
       final coords = GpsCoordinates(
         latitude: position.latitude,
         longitude: position.longitude,
         accuracy: position.accuracy,
       );
-
       final onCampus =
           CampusBoundary.isOnCampus(position.latitude, position.longitude);
-
       setState(() {
         _gpsCoordinates = coords;
         _isOnCampus = onCampus;
         _gpsError = onCampus
             ? null
-            : 'You appear to be outside the campus boundary. Infrastructure complaints must be filed on campus.';
+            : 'You appear to be outside the campus boundary.';
       });
     } catch (e) {
       setState(() => _gpsError = 'Failed to get location: $e');
@@ -156,83 +174,121 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     }
   }
 
-  // ─── Image picker ─────────────────────────────────────────────────────────
+  // ── Image picker ──────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
-    if (_selectedImages.length >= _maxImages) {
-      _showSnack('Maximum $_maxImages images allowed.');
+    if (_maxMoreImages <= 0) {
+      _showSnack('Total media limit reached (max $_totalMediaSlots files).');
       return;
     }
-
     final picker = ImagePicker();
     final picked = await picker.pickImage(
       source: source,
       imageQuality: 80,
       maxWidth: 1920,
     );
-
-    if (picked != null) {
-      setState(() => _selectedImages.add(File(picked.path)));
-    }
+    if (picked != null) setState(() => _selectedImages.add(File(picked.path)));
   }
 
-  void _removeImage(int index) {
-    setState(() => _selectedImages.removeAt(index));
-  }
+  void _removeImage(int index) =>
+      setState(() => _selectedImages.removeAt(index));
 
   void _showImageSourceSheet() {
     if (_cameraOnly) {
       _pickImage(ImageSource.camera);
       return;
     }
-
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: const Icon(Icons.camera_alt_rounded,
-                    color: Color(0xFF1A237E)),
-                title: const Text('Take Photo'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _pickImage(ImageSource.camera);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_rounded,
-                    color: Color(0xFF1A237E)),
-                title: const Text('Choose from Gallery'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _pickImage(ImageSource.gallery);
-                },
-              ),
-            ],
-          ),
-        ),
+      builder: (_) => _MediaSourceSheet(
+        title: 'Add Photo',
+        onCamera: () {
+          Navigator.pop(context);
+          _pickImage(ImageSource.camera);
+        },
+        onGallery: () {
+          Navigator.pop(context);
+          _pickImage(ImageSource.gallery);
+        },
       ),
     );
   }
 
-  // ─── Validation ───────────────────────────────────────────────────────────
+  // ── Video picker ──────────────────────────────────────────────────────────
+
+  Future<void> _pickVideo(ImageSource source) async {
+    if (_maxMoreVideos <= 0) {
+      _showSnack('Total media limit reached (max $_totalMediaSlots files).');
+      return;
+    }
+    final picker = ImagePicker();
+    final picked = await picker.pickVideo(
+      source: source,
+      maxDuration: const Duration(seconds: 30),
+    );
+    if (picked == null) return;
+
+    final file = File(picked.path);
+
+    // Validate duration using a temporary controller
+    final tempController = VideoPlayerController.file(file);
+    await tempController.initialize();
+    final duration = tempController.value.duration;
+    await tempController.dispose();
+
+    if (duration.inSeconds > 30) {
+      if (mounted) {
+        _showSnack('Video exceeds 30 seconds. Please choose a shorter clip.');
+      }
+      return;
+    }
+
+    final index = _selectedVideos.length;
+    setState(() {
+      _selectedVideos.add(file);
+      _videoControllers.add(null);
+      _videoInitializing.add(false);
+    });
+    await _initVideoController(index, file);
+  }
+
+  void _removeVideo(int index) {
+    _videoControllers[index]?.dispose();
+    setState(() {
+      _selectedVideos.removeAt(index);
+      _videoControllers.removeAt(index);
+      _videoInitializing.removeAt(index);
+    });
+  }
+
+  void _showVideoSourceSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _MediaSourceSheet(
+        title: 'Add Video',
+        cameraLabel: 'Record Video',
+        galleryLabel: 'Choose from Gallery',
+        onCamera: () {
+          Navigator.pop(context);
+          _pickVideo(ImageSource.camera);
+        },
+        onGallery: () {
+          Navigator.pop(context);
+          _pickVideo(ImageSource.gallery);
+        },
+      ),
+    );
+  }
+
+  // ── Validation ────────────────────────────────────────────────────────────
 
   String? _validate() {
     if (_selectedCategory == null) return 'Please select a complaint category.';
@@ -246,102 +302,70 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     return null;
   }
 
-  // ─── Build draft ──────────────────────────────────────────────────────────
-
-  PostModel _buildPost({required ComplaintStatus status}) {
-    final user = AuthService.instance.currentUser!;
-    final now = DateTime.now();
-
-    return PostModel(
-      id: widget.existingDraft?.id,
-      userId: user.uid,
-      userEmail: user.email ?? '',
-      userName: user.displayName ?? '',
-      title: _titleController.text.trim(),
-      description: _descriptionController.text.trim(),
-      category: _selectedCategory!,
-      building: _selectedBuilding!,
-      floor: _isOutdoor ? null : _selectedFloor,
-      roomNumber: _roomController.text.trim().isEmpty
-          ? null
-          : _roomController.text.trim(),
-      imageUrls: widget.existingDraft?.imageUrls ?? [],
-      localImagePaths: _selectedImages.map((f) => f.path).toList(),
-      gpsCoordinates: _gpsCoordinates,
-      isOnCampus: _isOnCampus,
-      status: status,
-      createdAt: widget.existingDraft?.createdAt ?? now,
-      updatedAt: now,
-    );
-  }
-
-  // ─── Actions ──────────────────────────────────────────────────────────────
-
-  Future<void> _saveDraft() async {
-    if (_selectedCategory == null && _selectedBuilding == null &&
-        _titleController.text.trim().isEmpty) {
-      _showSnack('Nothing to save yet.');
-      return;
-    }
-
-    // Use defaults if incomplete
-    final category = _selectedCategory ?? ComplaintCategory.other;
-    final building = _selectedBuilding ?? CampusLocations.allLocations.first;
-
-    setState(() => _isSavingDraft = true);
-
-    try {
-      final draft = PostModel(
-        id: widget.existingDraft?.id,
-        userId: AuthService.instance.currentUser!.uid,
-        userEmail: AuthService.instance.currentUser!.email ?? '',
-        userName: AuthService.instance.currentUser!.displayName ?? '',
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        category: category,
-        building: building,
-        floor: _selectedFloor,
-        roomNumber: _roomController.text.trim().isEmpty
-            ? null
-            : _roomController.text.trim(),
-        localImagePaths: _selectedImages.map((f) => f.path).toList(),
-        gpsCoordinates: _gpsCoordinates,
-        isOnCampus: _isOnCampus,
-        status: ComplaintStatus.draft,
-        createdAt: widget.existingDraft?.createdAt ?? DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-
-      await PostService.instance.saveDraft(draft);
-      if (mounted) {
-        _showSnack('Draft saved successfully.', isSuccess: true);
-        Navigator.of(context).pop(true);
-      }
-    } catch (e) {
-      setState(() => _errorMessage = e.toString());
-    } finally {
-      if (mounted) setState(() => _isSavingDraft = false);
-    }
-  }
+  // ── Submit / Draft ────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
     setState(() => _errorMessage = null);
-
     if (!_formKey.currentState!.validate()) return;
-
     final validationError = _validate();
     if (validationError != null) {
       setState(() => _errorMessage = validationError);
       return;
     }
-
     setState(() => _isSubmitting = true);
 
     try {
-      final post = _buildPost(status: ComplaintStatus.submitted);
+      final user = AuthService.instance.currentUser!;
+      final now = DateTime.now();
+      final docId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // Save images
+      List<String> imagePaths = [];
+      if (_selectedImages.isNotEmpty) {
+        imagePaths = await StorageService.instance.uploadComplaintImages(
+          userId: user.uid,
+          complaintId: docId,
+          files: _selectedImages,
+        );
+      }
+
+      // Save all videos
+      List<String> videoPaths = [];
+      for (int i = 0; i < _selectedVideos.length; i++) {
+        final path = await StorageService.instance.saveVideoLocally(
+          userId: user.uid,
+          complaintId: '$docId/video_$i',
+          videoFile: _selectedVideos[i],
+        );
+        videoPaths.add(path);
+      }
+
+      final post = PostModel(
+        id: widget.existingDraft?.id,
+        userId: user.uid,
+        userEmail: user.email ?? '',
+        userName: user.displayName ?? '',
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        category: _selectedCategory!,
+        building: _selectedBuilding!,
+        floor: _isOutdoor ? null : _selectedFloor,
+        roomNumber: _roomController.text.trim().isEmpty
+            ? null
+            : _roomController.text.trim(),
+        imageUrls: imagePaths,
+        videoPaths: videoPaths,
+        gpsCoordinates: _gpsCoordinates,
+        isOnCampus: _isOnCampus,
+        isPublic: _isPublic,
+        status: ComplaintStatus.submitted,
+        createdAt: widget.existingDraft?.createdAt ?? now,
+        updatedAt: now,
+      );
+
       await PostService.instance.submitComplaint(
         post: post,
-        imageFiles: _selectedImages,
+        imageFiles: [], // already saved above
       );
 
       if (mounted) {
@@ -355,23 +379,70 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     }
   }
 
+  Future<void> _saveDraft() async {
+    if (_selectedCategory == null &&
+        _selectedBuilding == null &&
+        _titleController.text.trim().isEmpty) {
+      _showSnack('Nothing to save yet.');
+      return;
+    }
+    setState(() => _isSavingDraft = true);
+    try {
+      final user = AuthService.instance.currentUser!;
+      final now = DateTime.now();
+
+      final draft = PostModel(
+        id: widget.existingDraft?.id,
+        userId: user.uid,
+        userEmail: user.email ?? '',
+        userName: user.displayName ?? '',
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        category: _selectedCategory ?? ComplaintCategory.other,
+        building: _selectedBuilding ?? CampusLocations.allLocations.first,
+        floor: _selectedFloor,
+        roomNumber: _roomController.text.trim().isEmpty
+            ? null
+            : _roomController.text.trim(),
+        localImagePaths: _selectedImages.map((f) => f.path).toList(),
+        videoPaths: _selectedVideos.map((f) => f.path).toList(),
+        gpsCoordinates: _gpsCoordinates,
+        isOnCampus: _isOnCampus,
+        isPublic: _isPublic,
+        status: ComplaintStatus.draft,
+        createdAt: widget.existingDraft?.createdAt ?? now,
+        updatedAt: now,
+      );
+
+      await PostService.instance.saveDraft(draft);
+      if (mounted) {
+        _showSnack('Draft saved.', isSuccess: true);
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      setState(() => _errorMessage = e.toString());
+    } finally {
+      if (mounted) setState(() => _isSavingDraft = false);
+    }
+  }
+
   void _showSnack(String message, {bool isSuccess = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
+        backgroundColor:
+            isSuccess ? Colors.green.shade700 : Colors.red.shade700,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 
-  // ─── Build ────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.existingDraft != null;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FF),
       appBar: AppBar(
@@ -379,12 +450,14 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          isEditing ? 'Edit Draft' : 'Report an Issue',
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+          widget.existingDraft != null ? 'Edit Draft' : 'Report an Issue',
+          style:
+              const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         actions: [
           TextButton.icon(
-            onPressed: (_isSavingDraft || _isSubmitting) ? null : _saveDraft,
+            onPressed:
+                (_isSavingDraft || _isSubmitting) ? null : _saveDraft,
             icon: _isSavingDraft
                 ? const SizedBox(
                     width: 14,
@@ -392,7 +465,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2),
                   )
-                : const Icon(Icons.save_outlined, color: Colors.white, size: 18),
+                : const Icon(Icons.save_outlined,
+                    color: Colors.white, size: 18),
             label: const Text('Save Draft',
                 style: TextStyle(color: Colors.white, fontSize: 13)),
           ),
@@ -401,17 +475,17 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Error banner
               if (_errorMessage != null) ...[
                 _ErrorBanner(message: _errorMessage!),
                 const SizedBox(height: 16),
               ],
 
-              // Section 1: Basic Info
+              // ── Section 1: Issue Details ──────────────────────────────
               _SectionCard(
                 title: 'Issue Details',
                 icon: Icons.report_problem_outlined,
@@ -448,7 +522,121 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
               ),
               const SizedBox(height: 16),
 
-              // Section 2: Category
+              // ── Section: Visibility ───────────────────────────────
+              _SectionCard(
+                title: 'Post Visibility',
+                icon: Icons.visibility_outlined,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isPublic = true),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 14, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: _isPublic
+                                  ? const Color(0xFF1A237E)
+                                  : const Color(0xFFF8F9FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _isPublic
+                                    ? const Color(0xFF1A237E)
+                                    : Colors.grey.shade200,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.public_rounded,
+                                    color: _isPublic
+                                        ? Colors.white
+                                        : Colors.grey.shade500,
+                                    size: 22),
+                                const SizedBox(height: 6),
+                                Text('Public',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: _isPublic
+                                          ? Colors.white
+                                          : const Color(0xFF37474F),
+                                    )),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Visible to all students',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: _isPublic
+                                        ? Colors.white70
+                                        : Colors.grey.shade500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isPublic = false),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 14, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: !_isPublic
+                                  ? const Color(0xFF1A237E)
+                                  : const Color(0xFFF8F9FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: !_isPublic
+                                    ? const Color(0xFF1A237E)
+                                    : Colors.grey.shade200,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.lock_outline_rounded,
+                                    color: !_isPublic
+                                        ? Colors.white
+                                        : Colors.grey.shade500,
+                                    size: 22),
+                                const SizedBox(height: 6),
+                                Text('Private',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: !_isPublic
+                                          ? Colors.white
+                                          : const Color(0xFF37474F),
+                                    )),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Only moderators & committee',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: !_isPublic
+                                        ? Colors.white70
+                                        : Colors.grey.shade500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
               _SectionCard(
                 title: 'Category',
                 icon: Icons.category_outlined,
@@ -460,13 +648,11 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                     onSelected: (cat) {
                       setState(() {
                         _selectedCategory = cat;
-                        // Reset GPS if not infrastructure
                         if (!ComplaintCategories.requiresGps(cat)) {
                           _gpsCoordinates = null;
                           _isOnCampus = null;
                           _gpsError = null;
                         }
-                        // Clear images if switching away from infra
                         if (!ComplaintCategories.cameraOnly(cat)) {
                           _selectedImages.clear();
                         }
@@ -477,7 +663,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
               ),
               const SizedBox(height: 16),
 
-              // Section 3: Location
+              // ── Section 3: Location ───────────────────────────────────
               _SectionCard(
                 title: 'Location',
                 icon: Icons.location_on_outlined,
@@ -512,15 +698,11 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                       ...CampusLocations.outdoorAreas.map((b) =>
                           DropdownMenuItem(value: b, child: Text(b))),
                     ],
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedBuilding = val;
-                        _selectedFloor = null;
-                      });
-                    },
+                    onChanged: (val) => setState(() {
+                      _selectedBuilding = val;
+                      _selectedFloor = null;
+                    }),
                   ),
-
-                  // Floor — only for indoor
                   if (_selectedBuilding != null && !_isOutdoor) ...[
                     const SizedBox(height: 16),
                     _FieldLabel('Floor'),
@@ -530,13 +712,13 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                       hint: 'Select floor',
                       icon: Icons.layers_outlined,
                       items: CampusLocations.floors
-                          .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+                          .map((f) =>
+                              DropdownMenuItem(value: f, child: Text(f)))
                           .toList(),
-                      onChanged: (val) => setState(() => _selectedFloor = val),
+                      onChanged: (val) =>
+                          setState(() => _selectedFloor = val),
                     ),
                   ],
-
-                  // Room (optional, indoor only)
                   if (_selectedBuilding != null && !_isOutdoor) ...[
                     const SizedBox(height: 16),
                     _FieldLabel('Room Number (Optional)'),
@@ -553,7 +735,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
               ),
               const SizedBox(height: 16),
 
-              // Section 4: GPS (Infrastructure only)
+              // ── Section 4: GPS (Infrastructure only) ─────────────────
               if (_requiresGps) ...[
                 _SectionCard(
                   title: 'GPS Verification',
@@ -573,7 +755,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                           const SizedBox(width: 10),
                           const Expanded(
                             child: Text(
-                              'Infrastructure complaints require GPS verification to confirm you are on campus.',
+                              'Infrastructure complaints require GPS verification.',
                               style: TextStyle(fontSize: 12),
                             ),
                           ),
@@ -581,8 +763,6 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // GPS Status
                     if (_gpsCoordinates != null) ...[
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -610,7 +790,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     _isOnCampus == true
@@ -639,12 +820,10 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                       ),
                       const SizedBox(height: 10),
                     ],
-
                     if (_gpsError != null) ...[
                       _ErrorBanner(message: _gpsError!),
                       const SizedBox(height: 10),
                     ],
-
                     SizedBox(
                       width: double.infinity,
                       height: 48,
@@ -664,7 +843,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                             : 'Capture GPS Location'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF1A237E),
-                          side: const BorderSide(color: Color(0xFF1A237E)),
+                          side: const BorderSide(
+                              color: Color(0xFF1A237E)),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
                         ),
@@ -675,7 +855,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                 const SizedBox(height: 16),
               ],
 
-              // Section 5: Evidence Images
+              // ── Section 5: Evidence Images ────────────────────────────
               _SectionCard(
                 title: 'Evidence Images',
                 icon: Icons.photo_camera_outlined,
@@ -697,13 +877,12 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                           Text(
                             'Infrastructure: camera capture only.',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.blue.shade700),
+                                fontSize: 12,
+                                color: Colors.blue.shade700),
                           ),
                         ],
                       ),
                     ),
-
-                  // Image grid
                   if (_selectedImages.isNotEmpty) ...[
                     GridView.builder(
                       shrinkWrap: true,
@@ -722,47 +901,82 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                     ),
                     const SizedBox(height: 12),
                   ],
-
-                  // Add image button
-                  if (_selectedImages.length < _maxImages)
+                  if (_maxMoreImages > 0)
                     GestureDetector(
                       onTap: _selectedCategory == null
                           ? () => _showSnack('Select a category first.')
                           : _showImageSourceSheet,
-                      child: Container(
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8F9FF),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.grey.shade300,
-                            style: BorderStyle.solid,
+                      child: _AddMediaButton(
+                        icon: Icons.add_photo_alternate_outlined,
+                        label:
+                            'Add Photo (${_selectedImages.length} photos • $_remainingSlots slot${_remainingSlots == 1 ? '' : 's'} left)',
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ── Section 6: Evidence Video ─────────────────────────────
+              _SectionCard(
+                title: 'Evidence Video',
+                icon: Icons.videocam_outlined,
+                children: [
+                  // Info note
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.purple.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline,
+                            color: Colors.purple.shade700, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Max 30 seconds per video • Total media limit: $_totalMediaSlots files.',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.purple.shade700),
                           ),
                         ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.add_photo_alternate_outlined,
-                                color: Colors.grey.shade500, size: 24),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Add Photo (${_selectedImages.length}/$_maxImages)',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 13),
-                            ),
-                          ],
-                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Video previews
+                  for (int i = 0; i < _selectedVideos.length; i++) ...[
+                    _VideoPreviewTile(
+                      controller: _videoControllers[i],
+                      isInitializing: _videoInitializing[i],
+                      onRemove: () => _removeVideo(i),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Add video button (only if slots remain)
+                  if (_maxMoreVideos > 0)
+                    GestureDetector(
+                      onTap: _showVideoSourceSheet,
+                      child: _AddMediaButton(
+                        icon: Icons.video_call_outlined,
+                        label:
+                            'Add Video (${_selectedVideos.length} video${_selectedVideos.length == 1 ? '' : 's'} • $_remainingSlots slot${_remainingSlots == 1 ? '' : 's'} left)',
                       ),
                     ),
                 ],
               ),
               const SizedBox(height: 28),
 
-              // Submit button
+              // ── Submit ────────────────────────────────────────────────
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: (_isSubmitting || _isSavingDraft) ? null : _submit,
+                  onPressed:
+                      (_isSubmitting || _isSavingDraft) ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1A237E),
                     foregroundColor: Colors.white,
@@ -792,7 +1006,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     );
   }
 
-  InputDecoration _inputDeco({required String hint, required IconData icon}) {
+  InputDecoration _inputDeco(
+      {required String hint, required IconData icon}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
@@ -809,29 +1024,30 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
           borderSide: BorderSide(color: Colors.grey.shade200)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF1A237E), width: 1.5)),
+          borderSide:
+              const BorderSide(color: Color(0xFF1A237E), width: 1.5)),
       errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Colors.redAccent)),
       focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5)),
+          borderSide:
+              const BorderSide(color: Colors.redAccent, width: 1.5)),
     );
   }
 }
 
-// ─── Reusable Widgets ─────────────────────────────────────────────────────────
+// ── Reusable Widgets ──────────────────────────────────────────────────────────
 
 class _SectionCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final List<Widget> children;
 
-  const _SectionCard({
-    required this.title,
-    required this.icon,
-    required this.children,
-  });
+  const _SectionCard(
+      {required this.title,
+      required this.icon,
+      required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -859,7 +1075,8 @@ class _SectionCard extends StatelessWidget {
                   color: const Color(0xFFE8EAF6),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, size: 18, color: const Color(0xFF1A237E)),
+                child:
+                    Icon(icon, size: 18, color: const Color(0xFF1A237E)),
               ),
               const SizedBox(width: 10),
               Text(
@@ -887,14 +1104,11 @@ class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.label);
 
   @override
-  Widget build(BuildContext context) => Text(
-        label,
-        style: const TextStyle(
+  Widget build(BuildContext context) => Text(label,
+      style: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF37474F),
-        ),
-      );
+          color: Color(0xFF37474F)));
 }
 
 class _ErrorBanner extends StatelessWidget {
@@ -911,23 +1125,53 @@ class _ErrorBanner extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.error_outline, color: Colors.red.shade700, size: 18),
+            Icon(Icons.error_outline,
+                color: Colors.red.shade700, size: 18),
             const SizedBox(width: 10),
             Expanded(
               child: Text(message,
-                  style:
-                      TextStyle(color: Colors.red.shade700, fontSize: 13)),
+                  style: TextStyle(
+                      color: Colors.red.shade700, fontSize: 13)),
             ),
           ],
         ),
       );
 }
 
+class _AddMediaButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _AddMediaButton({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.grey.shade500, size: 24),
+          const SizedBox(width: 8),
+          Text(label,
+              style:
+                  TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+}
+
 class _CategoryGrid extends StatelessWidget {
   final ComplaintCategory? selected;
   final ValueChanged<ComplaintCategory> onSelected;
 
-  const _CategoryGrid({required this.selected, required this.onSelected});
+  const _CategoryGrid(
+      {required this.selected, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -944,8 +1188,7 @@ class _CategoryGrid extends StatelessWidget {
           onTap: () => onSelected(cat),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: isSelected
                   ? const Color(0xFF1A237E)
@@ -968,7 +1211,9 @@ class _CategoryGrid extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: isSelected ? Colors.white : const Color(0xFF37474F),
+                      color: isSelected
+                          ? Colors.white
+                          : const Color(0xFF37474F),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1041,7 +1286,9 @@ class _ImageTile extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Image.file(file,
-              fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity),
         ),
         Positioned(
           top: 4,
@@ -1054,11 +1301,189 @@ class _ImageTile extends StatelessWidget {
                 color: Colors.black54,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.close, color: Colors.white, size: 14),
+              child: const Icon(Icons.close,
+                  color: Colors.white, size: 14),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _VideoPreviewTile extends StatelessWidget {
+  final VideoPlayerController? controller;
+  final bool isInitializing;
+  final VoidCallback onRemove;
+
+  const _VideoPreviewTile({
+    required this.controller,
+    required this.isInitializing,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Video preview
+          if (!isInitializing &&
+              controller != null &&
+              controller!.value.isInitialized)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: AspectRatio(
+                aspectRatio: controller!.value.aspectRatio,
+                child: VideoPlayer(controller!),
+              ),
+            )
+          else
+            const CircularProgressIndicator(color: Colors.white),
+
+          // Play/pause button
+          if (!isInitializing &&
+              controller != null &&
+              controller!.value.isInitialized)
+            GestureDetector(
+              onTap: () {
+                controller!.value.isPlaying
+                    ? controller!.pause()
+                    : controller!.play();
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: const BoxDecoration(
+                  color: Colors.black45,
+                  shape: BoxShape.circle,
+                ),
+                child: StatefulBuilder(
+                  builder: (ctx, setLocalState) {
+                    return ValueListenableBuilder<VideoPlayerValue>(
+                      valueListenable: controller!,
+                      builder: (_, value, __) => Icon(
+                        value.isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 36,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+          // Duration badge
+          if (!isInitializing &&
+              controller != null &&
+              controller!.value.isInitialized)
+            Positioned(
+              bottom: 8,
+              left: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _formatDuration(controller!.value.duration),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500),
+                ),
+              ),
+            ),
+
+          // Remove button
+          Positioned(
+            top: 8,
+            right: 8,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close,
+                    color: Colors.white, size: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+}
+
+class _MediaSourceSheet extends StatelessWidget {
+  final String title;
+  final String cameraLabel;
+  final String galleryLabel;
+  final VoidCallback onCamera;
+  final VoidCallback onGallery;
+
+  const _MediaSourceSheet({
+    required this.title,
+    this.cameraLabel = 'Take Photo',
+    this.galleryLabel = 'Choose from Gallery',
+    required this.onCamera,
+    required this.onGallery,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded,
+                  color: Color(0xFF1A237E)),
+              title: Text(cameraLabel),
+              onTap: onCamera,
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded,
+                  color: Color(0xFF1A237E)),
+              title: Text(galleryLabel),
+              onTap: onGallery,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

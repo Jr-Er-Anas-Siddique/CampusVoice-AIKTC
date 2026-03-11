@@ -54,13 +54,13 @@ class GpsCoordinates {
   });
 
   Map<String, dynamic> toMap() {
-  final map = <String, dynamic>{
-    'latitude': latitude,
-    'longitude': longitude,
-  };
-  if (accuracy != null) map['accuracy'] = accuracy;
-  return map;
-}
+    final map = <String, dynamic>{
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+    if (accuracy != null) map['accuracy'] = accuracy;
+    return map;
+  }
 
   factory GpsCoordinates.fromMap(Map<String, dynamic> map) => GpsCoordinates(
         latitude: (map['latitude'] as num).toDouble(),
@@ -87,9 +87,12 @@ class PostModel {
   final String? floor;
   final String? roomNumber;
 
-  // Media
-  final List<String> imageUrls; // Firebase Storage URLs
-  final List<String> localImagePaths; // local paths (draft only)
+  // Media — images
+  final List<String> imageUrls;       // permanent cloud URLs (submitted)
+  final List<String> localImagePaths; // temp paths (draft only)
+
+  // Media — videos (max up to totalMediaSlots - imageCount)
+  final List<String> videoPaths;      // permanent cloud URLs or local paths
 
   // GPS
   final GpsCoordinates? gpsCoordinates;
@@ -97,6 +100,7 @@ class PostModel {
 
   // Status
   final ComplaintStatus status;
+  final bool isPublic; // true = visible in feed, false = private (moderator/committee only)
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -113,15 +117,18 @@ class PostModel {
     this.roomNumber,
     this.imageUrls = const [],
     this.localImagePaths = const [],
+    this.videoPaths = const [],
     this.gpsCoordinates,
     this.isOnCampus,
     this.status = ComplaintStatus.draft,
+    this.isPublic = true,
     required this.createdAt,
     required this.updatedAt,
   });
 
   bool get isDraft => status == ComplaintStatus.draft;
   bool get isOutdoor => _outdoorLocations.contains(building);
+  bool get hasVideo => videoPaths.isNotEmpty;
 
   static const List<String> _outdoorLocations = [
     'Ground',
@@ -143,9 +150,11 @@ class PostModel {
     String? roomNumber,
     List<String>? imageUrls,
     List<String>? localImagePaths,
+    List<String>? videoPaths,
     GpsCoordinates? gpsCoordinates,
     bool? isOnCampus,
     ComplaintStatus? status,
+    bool? isPublic,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -162,38 +171,42 @@ class PostModel {
       roomNumber: roomNumber ?? this.roomNumber,
       imageUrls: imageUrls ?? this.imageUrls,
       localImagePaths: localImagePaths ?? this.localImagePaths,
+      videoPaths: videoPaths ?? this.videoPaths,
       gpsCoordinates: gpsCoordinates ?? this.gpsCoordinates,
       isOnCampus: isOnCampus ?? this.isOnCampus,
       status: status ?? this.status,
+      isPublic: isPublic ?? this.isPublic,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
-  // Firestore serialization
+  // ── Firestore serialization ─────────────────────────────────────────────
+
   Map<String, dynamic> toFirestore() {
-  final map = <String, dynamic>{
-    'userId': userId,
-    'userEmail': userEmail,
-    'userName': userName,
-    'title': title,
-    'description': description,
-    'category': category.name,
-    'building': building,
-    'status': status.name,
-    'imageUrls': imageUrls,
-    'createdAt': createdAt.toIso8601String(),
-    'updatedAt': updatedAt.toIso8601String(),
-  };
+    final map = <String, dynamic>{
+      'userId': userId,
+      'userEmail': userEmail,
+      'userName': userName,
+      'title': title,
+      'description': description,
+      'category': category.name,
+      'building': building,
+      'status': status.name,
+      'isPublic': isPublic,
+      'imageUrls': imageUrls,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
 
-  // Only add optional fields if they have values
-  if (floor != null) map['floor'] = floor;
-  if (roomNumber != null) map['roomNumber'] = roomNumber;
-  if (isOnCampus != null) map['isOnCampus'] = isOnCampus;
-  if (gpsCoordinates != null) map['gpsCoordinates'] = gpsCoordinates!.toMap();
+    if (floor != null) map['floor'] = floor;
+    if (roomNumber != null) map['roomNumber'] = roomNumber;
+    if (isOnCampus != null) map['isOnCampus'] = isOnCampus;
+    if (gpsCoordinates != null) map['gpsCoordinates'] = gpsCoordinates!.toMap();
+    if (videoPaths.isNotEmpty) map['videoPaths'] = videoPaths;
 
-  return map;
-}
+    return map;
+  }
 
   factory PostModel.fromFirestore(Map<String, dynamic> map, String docId) {
     return PostModel(
@@ -211,6 +224,7 @@ class PostModel {
       floor: map['floor'],
       roomNumber: map['roomNumber'],
       imageUrls: List<String>.from(map['imageUrls'] ?? []),
+      videoPaths: List<String>.from(map['videoPaths'] ?? []),
       gpsCoordinates: map['gpsCoordinates'] != null
           ? GpsCoordinates.fromMap(
               Map<String, dynamic>.from(map['gpsCoordinates']))
@@ -220,12 +234,14 @@ class PostModel {
         (e) => e.name == map['status'],
         orElse: () => ComplaintStatus.draft,
       ),
+      isPublic: map['isPublic'] ?? true,
       createdAt: DateTime.parse(map['createdAt']),
       updatedAt: DateTime.parse(map['updatedAt']),
     );
   }
 
-  // SharedPreferences / local draft serialization
+  // ── Draft serialization (SharedPreferences) ─────────────────────────────
+
   Map<String, dynamic> toDraftMap() => {
         'id': id,
         'userId': userId,
@@ -239,9 +255,11 @@ class PostModel {
         'roomNumber': roomNumber,
         'imageUrls': imageUrls,
         'localImagePaths': localImagePaths,
+        'videoPaths': videoPaths,
         'gpsCoordinates': gpsCoordinates?.toMap(),
         'isOnCampus': isOnCampus,
         'status': status.name,
+        'isPublic': isPublic,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -263,6 +281,7 @@ class PostModel {
       roomNumber: map['roomNumber'],
       imageUrls: List<String>.from(map['imageUrls'] ?? []),
       localImagePaths: List<String>.from(map['localImagePaths'] ?? []),
+      videoPaths: List<String>.from(map['videoPaths'] ?? []),
       gpsCoordinates: map['gpsCoordinates'] != null
           ? GpsCoordinates.fromMap(
               Map<String, dynamic>.from(map['gpsCoordinates']))
@@ -272,6 +291,7 @@ class PostModel {
         (e) => e.name == map['status'],
         orElse: () => ComplaintStatus.draft,
       ),
+      isPublic: map['isPublic'] ?? true,
       createdAt: DateTime.parse(map['createdAt']),
       updatedAt: DateTime.parse(map['updatedAt']),
     );

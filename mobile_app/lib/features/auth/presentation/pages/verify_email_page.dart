@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
 import 'package:mobile_app/main.dart';
 import '../../../../services/auth_service.dart';
 
@@ -38,7 +39,7 @@ void _startPolling() {
         _timer?.cancel();
         // Navigate directly — don't wait for stream
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const HomePage()),
+          MaterialPageRoute(builder: (_) => const FeedPage()),
           (route) => false,
         );
       }

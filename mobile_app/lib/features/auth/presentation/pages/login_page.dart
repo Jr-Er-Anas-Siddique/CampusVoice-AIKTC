@@ -3,6 +3,7 @@
 // PLACEMENT: lib/features/auth/presentation/pages/login_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
 import '../../../../services/auth_service.dart';
 import 'signup_page.dart';
 // import 'package:firebase_auth/firebase_auth.dart';
@@ -55,7 +56,7 @@ class _LoginPageState extends State<LoginPage> {
 
       // Manual navigation fallback — don't rely solely on stream
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        MaterialPageRoute(builder: (_) => const FeedPage()),
         (route) => false,
       );
     } on AuthException catch (e) {
