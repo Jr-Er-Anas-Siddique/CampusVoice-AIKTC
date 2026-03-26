@@ -102,16 +102,43 @@ class _SignupPageState extends State<SignupPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-                colors: [Color(0xFF1A237E), Color(0xFF283593)]),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: const Icon(Icons.school_rounded, color: Colors.white, size: 32),
+        // Logo + app name row — same as login page
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF1A237E), Color(0xFF283593)]),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.school_rounded,
+                  color: Colors.white, size: 32),
+            ),
+            const SizedBox(width: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'CampusVoice',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1A237E),
+                  ),
+                ),
+                Text(
+                  'AIKTC',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.grey.shade500,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 28),
         Text(
           'Create Account',
           style: theme.textTheme.headlineMedium?.copyWith(

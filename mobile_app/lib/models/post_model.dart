@@ -71,6 +71,38 @@ class GpsCoordinates {
       );
 }
 
+class StatusHistoryEntry {
+  final ComplaintStatus status;
+  final DateTime changedAt;
+  final String changedBy;
+  final String? note;
+
+  const StatusHistoryEntry({
+    required this.status,
+    required this.changedAt,
+    required this.changedBy,
+    this.note,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'status': status.name,
+        'changedAt': changedAt.toIso8601String(),
+        'changedBy': changedBy,
+        if (note != null) 'note': note,
+      };
+
+  factory StatusHistoryEntry.fromMap(Map<String, dynamic> map) =>
+      StatusHistoryEntry(
+        status: ComplaintStatus.values.firstWhere(
+          (e) => e.name == map['status'],
+          orElse: () => ComplaintStatus.submitted,
+        ),
+        changedAt: DateTime.parse(map['changedAt']),
+        changedBy: map['changedBy'] ?? '',
+        note: map['note'],
+      );
+}
+
 class PostModel {
   final String? id;
   final String userId;
@@ -104,6 +136,14 @@ class PostModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  // Social
+  final int supportCount;
+  final int commentCount;
+
+  // Committee
+  final String? assignedCommittee;
+  final List<StatusHistoryEntry> statusHistory;
+
   const PostModel({
     this.id,
     required this.userId,
@@ -124,6 +164,10 @@ class PostModel {
     this.isPublic = true,
     required this.createdAt,
     required this.updatedAt,
+    this.supportCount = 0,
+    this.commentCount = 0,
+    this.assignedCommittee,
+    this.statusHistory = const [],
   });
 
   bool get isDraft => status == ComplaintStatus.draft;
@@ -157,6 +201,10 @@ class PostModel {
     bool? isPublic,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? supportCount,
+    int? commentCount,
+    String? assignedCommittee,
+    List<StatusHistoryEntry>? statusHistory,
   }) {
     return PostModel(
       id: id ?? this.id,
@@ -178,6 +226,10 @@ class PostModel {
       isPublic: isPublic ?? this.isPublic,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      supportCount: supportCount ?? this.supportCount,
+      commentCount: commentCount ?? this.commentCount,
+      assignedCommittee: assignedCommittee ?? this.assignedCommittee,
+      statusHistory: statusHistory ?? this.statusHistory,
     );
   }
 
@@ -195,6 +247,9 @@ class PostModel {
       'status': status.name,
       'isPublic': isPublic,
       'imageUrls': imageUrls,
+      'supportCount': supportCount,
+      'commentCount': commentCount,
+      'statusHistory': statusHistory.map((e) => e.toMap()).toList(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
@@ -204,6 +259,7 @@ class PostModel {
     if (isOnCampus != null) map['isOnCampus'] = isOnCampus;
     if (gpsCoordinates != null) map['gpsCoordinates'] = gpsCoordinates!.toMap();
     if (videoPaths.isNotEmpty) map['videoPaths'] = videoPaths;
+    if (assignedCommittee != null) map['assignedCommittee'] = assignedCommittee;
 
     return map;
   }
@@ -237,6 +293,12 @@ class PostModel {
       isPublic: map['isPublic'] ?? true,
       createdAt: DateTime.parse(map['createdAt']),
       updatedAt: DateTime.parse(map['updatedAt']),
+      supportCount: (map['supportCount'] ?? 0) as int,
+      commentCount: (map['commentCount'] ?? 0) as int,
+      assignedCommittee: map['assignedCommittee'],
+      statusHistory: (map['statusHistory'] as List<dynamic>? ?? [])
+          .map((e) => StatusHistoryEntry.fromMap(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
 
@@ -260,6 +322,8 @@ class PostModel {
         'isOnCampus': isOnCampus,
         'status': status.name,
         'isPublic': isPublic,
+        'supportCount': supportCount,
+        'commentCount': commentCount,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -294,6 +358,8 @@ class PostModel {
       isPublic: map['isPublic'] ?? true,
       createdAt: DateTime.parse(map['createdAt']),
       updatedAt: DateTime.parse(map['updatedAt']),
+      supportCount: (map['supportCount'] ?? 0) as int,
+      commentCount: (map['commentCount'] ?? 0) as int,
     );
   }
 }

@@ -1,7 +1,4 @@
 // lib/features/feed/presentation/pages/feed_page.dart
-//
-// Social media style feed showing all campus complaints.
-// Design consistent with login/signup — primary 0xFF1A237E.
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,11 +6,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../models/post_model.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../services/social_service.dart';
 import '../../../posts/presentation/pages/report_issue_page.dart';
+import 'complaint_detail_page.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
-
   @override
   State<FeedPage> createState() => _FeedPageState();
 }
@@ -26,55 +24,45 @@ class _FeedPageState extends State<FeedPage> {
         .collection('complaints')
         .where('status', isEqualTo: 'submitted')
         .orderBy('createdAt', descending: true);
-
     if (_filterCategory != null) {
       query = query.where('category', isEqualTo: _filterCategory!.name);
     }
-
     return query.snapshots().map((snap) => snap.docs
         .map((doc) => PostModel.fromFirestore(doc.data(), doc.id))
-        // Client-side: show posts where isPublic is true OR field is absent (old posts)
-        .where((post) => post.isPublic)
+        .where((p) => p.isPublic)
         .toList());
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = AuthService.instance.currentUser;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FF),
+      backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A237E),
-        foregroundColor: Colors.white,
         elevation: 0,
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.campaign_rounded, size: 22),
-            SizedBox(width: 8),
-            Text(
-              'CampusVoice',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                letterSpacing: 0.5,
-              ),
-            ),
+            const Icon(Icons.campaign_rounded, color: Colors.white, size: 26),
+            const SizedBox(width: 8),
+            const Text('CampusVoice',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20)),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Sign out',
-            onPressed: () async {
-              await AuthService.instance.signOut();
-            },
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+            onPressed: () => AuthService.instance.signOut(),
           ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(52),
           child: _CategoryFilterBar(
             selected: _filterCategory,
-            onSelected: (cat) =>
-                setState(() => _filterCategory = cat),
+            onSelected: (cat) => setState(() => _filterCategory = cat),
           ),
         ),
       ),
@@ -83,28 +71,12 @@ class _FeedPageState extends State<FeedPage> {
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(
-                  color: Color(0xFF1A237E)),
-            );
+                child: CircularProgressIndicator(color: Color(0xFF1A237E)));
           }
-
           if (snap.hasError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline,
-                      color: Colors.red.shade400, size: 48),
-                  const SizedBox(height: 12),
-                  Text('Failed to load complaints',
-                      style: TextStyle(color: Colors.grey.shade600)),
-                ],
-              ),
-            );
+            return Center(child: Text('Error: ${snap.error}'));
           }
-
           final posts = snap.data ?? [];
-
           if (posts.isEmpty) {
             return Center(
               child: Column(
@@ -112,59 +84,41 @@ class _FeedPageState extends State<FeedPage> {
                 children: [
                   Icon(Icons.inbox_outlined,
                       size: 64, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  Text(
-                    _filterCategory == null
-                        ? 'No complaints yet.'
-                        : 'No ${_filterCategory!.label} complaints.',
-                    style: TextStyle(
-                        color: Colors.grey.shade500, fontSize: 15),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Be the first to report an issue.',
-                    style: TextStyle(
-                        color: Colors.grey.shade400, fontSize: 13),
-                  ),
+                  const SizedBox(height: 12),
+                  Text('No complaints yet',
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 16)),
                 ],
               ),
             );
           }
-
-          return RefreshIndicator(
-            color: const Color(0xFF1A237E),
-            onRefresh: () async =>
-                setState(() {}), // triggers stream rebuild
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-              itemCount: posts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (ctx, i) => ComplaintCard(post: posts[i]),
-            ),
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            itemCount: posts.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (_, i) => ComplaintCard(post: posts[i]),
           );
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(
-              builder: (_) => const ReportIssuePage()),
-        ),
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add_rounded),
         label: const Text('Report Issue',
             style: TextStyle(fontWeight: FontWeight.w600)),
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ReportIssuePage()),
+        ),
       ),
     );
   }
 }
 
-// ── Category Filter Bar ───────────────────────────────────────────────────────
+// ── Category Filter Bar ──────────────────────────────────────────────────────
 
 class _CategoryFilterBar extends StatelessWidget {
   final ComplaintCategory? selected;
   final ValueChanged<ComplaintCategory?> onSelected;
-
   const _CategoryFilterBar(
       {required this.selected, required this.onSelected});
 
@@ -174,25 +128,19 @@ class _CategoryFilterBar extends StatelessWidget {
       height: 52,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         children: [
-          // "All" chip
-          _FilterChip(
+          _Chip(
             label: 'All',
             emoji: '📋',
             isSelected: selected == null,
             onTap: () => onSelected(null),
           ),
-          const SizedBox(width: 8),
-          ...ComplaintCategory.values.map((cat) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: _FilterChip(
-                  label: cat.label,
-                  emoji: cat.icon,
-                  isSelected: selected == cat,
-                  onTap: () =>
-                      onSelected(selected == cat ? null : cat),
-                ),
+          ...ComplaintCategory.values.map((cat) => _Chip(
+                label: cat.label,
+                emoji: cat.icon,
+                isSelected: selected == cat,
+                onTap: () => onSelected(selected == cat ? null : cat),
               )),
         ],
       ),
@@ -200,49 +148,314 @@ class _CategoryFilterBar extends StatelessWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final String emoji;
+class _Chip extends StatelessWidget {
+  final String label, emoji;
   final bool isSelected;
   final VoidCallback onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.emoji,
-    required this.isSelected,
-    required this.onTap,
-  });
+  const _Chip(
+      {required this.label,
+      required this.emoji,
+      required this.isSelected,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.white.withOpacity(0.15),
+          color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected
-                ? Colors.white
-                : Colors.white.withOpacity(0.3),
-          ),
+              color: isSelected
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(emoji, style: const TextStyle(fontSize: 12)),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isSelected
-                    ? const Color(0xFF1A237E)
-                    : Colors.white,
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected
+                        ? const Color(0xFF1A237E)
+                        : Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Complaint Card ───────────────────────────────────────────────────────────
+
+class ComplaintCard extends StatelessWidget {
+  final PostModel post;
+  const ComplaintCard({super.key, required this.post});
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  Color _statusColor(ComplaintStatus s) {
+    switch (s) {
+      case ComplaintStatus.submitted: return Colors.orange;
+      case ComplaintStatus.inProgress: return Colors.blue;
+      case ComplaintStatus.resolved: return Colors.green;
+      case ComplaintStatus.rejected: return Colors.red;
+      default: return Colors.grey;
+    }
+  }
+
+  String _statusLabel(ComplaintStatus s) {
+    switch (s) {
+      case ComplaintStatus.submitted: return 'Pending';
+      case ComplaintStatus.inProgress: return 'In Progress';
+      case ComplaintStatus.resolved: return 'Resolved';
+      case ComplaintStatus.rejected: return 'Rejected';
+      default: return 'Draft';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ComplaintDetailPage(post: post))),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+              child: Row(
+                children: [
+                  // Avatar
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: const Color(0xFF1A237E),
+                    child: Text(
+                      post.userName.isNotEmpty
+                          ? post.userName[0].toUpperCase()
+                          : 'S',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(post.userName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 14)),
+                        Text(
+                          '${post.building}  •  ${_timeAgo(post.createdAt)}',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _statusColor(post.status)
+                          .withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _statusLabel(post.status),
+                      style: TextStyle(
+                          color: _statusColor(post.status),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Category tag + title ─────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(post.category.icon,
+                          style: const TextStyle(fontSize: 13)),
+                      const SizedBox(width: 4),
+                      Text(post.category.label,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.indigo.shade400,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(post.title,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A237E))),
+                  const SizedBox(height: 4),
+                  Text(post.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          height: 1.4)),
+                ],
+              ),
+            ),
+
+            // ── Media ────────────────────────────────────────────
+            if (post.imageUrls.isNotEmpty || post.videoPaths.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              FeedMediaCarousel(
+                  imageUrls: post.imageUrls, videoPaths: post.videoPaths),
+            ],
+
+            // ── Action bar ───────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              child: Row(
+                children: [
+                  // Support button — live
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('complaints')
+                        .doc(post.id)
+                        .collection('supporters')
+                        .doc(uid)
+                        .snapshots(),
+                    builder: (context, snap) {
+                      final supported = snap.data?.exists ?? false;
+                      return GestureDetector(
+                        onTap: () => SocialService.instance.toggleSupport(
+                            complaintId: post.id!, userId: uid),
+                        child: Row(
+                          children: [
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: Icon(
+                                supported
+                                    ? Icons.thumb_up_rounded
+                                    : Icons.thumb_up_alt_outlined,
+                                key: ValueKey(supported),
+                                size: 20,
+                                color: supported
+                                    ? const Color(0xFF1A237E)
+                                    : Colors.grey.shade500,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            // Live support count
+                            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('complaints')
+                                  .doc(post.id)
+                                  .snapshots(),
+                              builder: (context, countSnap) {
+                                final count = countSnap.hasData
+                                    ? ((countSnap.data!.data()?[
+                                            'supportCount'] ??
+                                        post.supportCount) as int)
+                                    : post.supportCount;
+                                return Text('$count',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: supported
+                                            ? const Color(0xFF1A237E)
+                                            : Colors.grey.shade500));
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(width: 20),
+
+                  // Comment count
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('complaints')
+                        .doc(post.id)
+                        .snapshots(),
+                    builder: (context, snap) {
+                      final count = snap.hasData
+                          ? ((snap.data!.data()?['commentCount'] ??
+                              post.commentCount) as int)
+                          : post.commentCount;
+                      return Row(
+                        children: [
+                          Icon(Icons.chat_bubble_outline_rounded,
+                              size: 19, color: Colors.grey.shade500),
+                          const SizedBox(width: 4),
+                          Text('$count',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500)),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const Spacer(),
+
+                  // GPS verified
+                  if (post.isOnCampus == true)
+                    Row(
+                      children: [
+                        Icon(Icons.verified_rounded,
+                            size: 14, color: Colors.green.shade500),
+                        const SizedBox(width: 3),
+                        Text('Verified',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.green.shade600,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                ],
               ),
             ),
           ],
@@ -252,352 +465,79 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-// ── Complaint Card ────────────────────────────────────────────────────────────
+// ── Media Item Model ─────────────────────────────────────────────────────────
 
-class ComplaintCard extends StatelessWidget {
-  final PostModel post;
-  const ComplaintCard({super.key, required this.post});
+enum _MediaType { image, video }
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.indigo.withOpacity(0.07),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header ────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Row(
-              children: [
-                // Avatar
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: Text(
-                      post.userName.isNotEmpty
-                          ? post.userName[0].toUpperCase()
-                          : 'S',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        post.userName.isNotEmpty
-                            ? post.userName
-                            : 'Student',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          color: Color(0xFF1A237E),
-                        ),
-                      ),
-                      Text(
-                        _formatTime(post.createdAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Category badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _categoryColor(post.category).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color:
-                          _categoryColor(post.category).withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(post.category.icon,
-                          style: const TextStyle(fontSize: 11)),
-                      const SizedBox(width: 4),
-                      Text(
-                        post.category.label,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: _categoryColor(post.category),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Title & Description ───────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  post.title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1A237E),
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  post.description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade700,
-                    height: 1.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Location chip ─────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Row(
-              children: [
-                Icon(Icons.location_on_outlined,
-                    size: 14, color: Colors.grey.shade500),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    _locationText(post),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade500,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (post.isOnCampus == true)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.gps_fixed_rounded,
-                            size: 10, color: Colors.green.shade600),
-                        const SizedBox(width: 3),
-                        Text('GPS verified',
-                            style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.green.shade600,
-                                fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // ── Unified Media Carousel (images + videos in sequence) ──
-          if (post.imageUrls.isNotEmpty || post.videoPaths.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _MediaCarousel(
-              imageUrls: post.imageUrls,
-              videoPaths: post.videoPaths,
-            ),
-          ],
-
-          // ── Footer ────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: Row(
-              children: [
-                _StatusBadge(status: post.status),
-                const Spacer(),
-                if (post.imageUrls.isNotEmpty)
-                  Row(
-                    children: [
-                      Icon(Icons.photo_outlined,
-                          size: 14, color: Colors.grey.shade400),
-                      const SizedBox(width: 3),
-                      Text('${post.imageUrls.length}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade400)),
-                      const SizedBox(width: 10),
-                    ],
-                  ),
-                if (post.videoPaths.isNotEmpty)
-                  Row(
-                    children: [
-                      Icon(Icons.videocam_outlined,
-                          size: 14, color: Colors.grey.shade400),
-                      const SizedBox(width: 3),
-                      Text('${post.videoPaths.length}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade400)),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _locationText(PostModel post) {
-    final parts = [post.building];
-    if (post.floor != null) parts.add(post.floor!);
-    if (post.roomNumber != null) parts.add(post.roomNumber!);
-    return parts.join(' • ');
-  }
-
-  String _formatTime(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return '${dt.day}/${dt.month}/${dt.year}';
-  }
-
-  Color _categoryColor(ComplaintCategory cat) {
-    switch (cat) {
-      case ComplaintCategory.infrastructure:
-        return const Color(0xFFE65100);
-      case ComplaintCategory.academic:
-        return const Color(0xFF1565C0);
-      case ComplaintCategory.administrative:
-        return const Color(0xFF6A1B9A);
-      case ComplaintCategory.safety:
-        return const Color(0xFFC62828);
-      case ComplaintCategory.other:
-        return const Color(0xFF2E7D32);
-    }
-  }
-}
-
-// ── Unified Media Carousel (images + videos in one PageView) ─────────────────
-
-// Each item is either an image URL or a video path — we wrap them in a sealed type
 class _MediaItem {
   final String url;
-  final bool isVideo;
-  const _MediaItem({required this.url, required this.isVideo});
+  final _MediaType type;
+  const _MediaItem({required this.url, required this.type});
 }
 
-class _MediaCarousel extends StatefulWidget {
+// ── Feed Media Carousel ──────────────────────────────────────────────────────
+
+class FeedMediaCarousel extends StatefulWidget {
   final List<String> imageUrls;
   final List<String> videoPaths;
-  const _MediaCarousel({required this.imageUrls, required this.videoPaths});
+  const FeedMediaCarousel(
+      {super.key, required this.imageUrls, required this.videoPaths});
 
   @override
-  State<_MediaCarousel> createState() => _MediaCarouselState();
+  State<FeedMediaCarousel> createState() => _FeedMediaCarouselState();
 }
 
-class _MediaCarouselState extends State<_MediaCarousel> {
+class _FeedMediaCarouselState extends State<FeedMediaCarousel> {
   int _current = 0;
-  late final PageController _pageController;
-  late final List<_MediaItem> _items;
 
-  @override
-  void initState() {
-    super.initState();
-    _pageController = PageController();
-    // Images first, then videos — in order
-    _items = [
-      ...widget.imageUrls.map((u) => _MediaItem(url: u, isVideo: false)),
-      ...widget.videoPaths.map((v) => _MediaItem(url: v, isVideo: true)),
-    ];
-  }
+  List<_MediaItem> get _items => [
+        ...widget.imageUrls
+            .map((u) => _MediaItem(url: u, type: _MediaType.image)),
+        ...widget.videoPaths
+            .map((p) => _MediaItem(url: p, type: _MediaType.video)),
+      ];
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
+  void _openFullscreen(int index) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => FullScreenMediaViewer(
+        items: _items,
+        initialIndex: index,
+      ),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_items.isEmpty) return const SizedBox.shrink();
+    final items = _items;
+    if (items.isEmpty) return const SizedBox.shrink();
 
     return Column(
       children: [
         SizedBox(
           height: 220,
           child: PageView.builder(
-            controller: _pageController,
-            itemCount: _items.length,
+            itemCount: items.length,
             onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (ctx, i) {
-              final item = _items[i];
-              if (item.isVideo) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _LazyVideoPlayer(videoUrl: item.url),
-                );
-              } else {
-                return GestureDetector(
-                  onTap: () => _showFullScreen(context, item.url),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: SizedBox.expand(
-                        child: _buildImage(item.url),
-                      ),
-                    ),
-                  ),
-                );
-              }
+            itemBuilder: (_, i) {
+              final item = items[i];
+              return item.type == _MediaType.image
+                  ? _CarouselImage(
+                      url: item.url,
+                      onTap: () => _openFullscreen(i),
+                    )
+                  : _CarouselVideo(
+                      path: item.url,
+                      onTapFullscreen: () => _openFullscreen(i),
+                    );
             },
           ),
         ),
-        if (_items.length > 1) ...[
-          const SizedBox(height: 8),
+        if (items.length > 1) ...[
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
-              _items.length,
+              items.length,
               (i) => AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.symmetric(horizontal: 3),
@@ -616,143 +556,100 @@ class _MediaCarouselState extends State<_MediaCarousel> {
       ],
     );
   }
-
-  Widget _buildImage(String url) {
-    if (url.startsWith('http')) {
-      return Image.network(
-        url,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        loadingBuilder: (ctx, child, progress) {
-          if (progress == null) return child;
-          return Container(
-            color: Colors.grey.shade100,
-            child: const Center(
-              child: CircularProgressIndicator(
-                  color: Color(0xFF1A237E), strokeWidth: 2),
-            ),
-          );
-        },
-        errorBuilder: (_, __, ___) => Container(
-          color: Colors.grey.shade100,
-          child: Icon(Icons.broken_image_outlined,
-              color: Colors.grey.shade400, size: 40),
-        ),
-      );
-    } else {
-      final file = File(url);
-      if (file.existsSync()) {
-        return Image.file(file,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity);
-      }
-      return Container(
-        color: Colors.grey.shade100,
-        child: Icon(Icons.broken_image_outlined,
-            color: Colors.grey.shade400, size: 40),
-      );
-    }
-  }
-
-  void _showFullScreen(BuildContext context, String url) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _FullScreenImage(url: url),
-    ));
-  }
 }
 
-class _FullScreenImage extends StatelessWidget {
+// ── Carousel Image Tile ──────────────────────────────────────────────────────
+
+class _CarouselImage extends StatelessWidget {
   final String url;
-  const _FullScreenImage({required this.url});
+  final VoidCallback onTap;
+  const _CarouselImage({required this.url, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: Center(
-        child: InteractiveViewer(
-          child: url.startsWith('http')
-              ? Image.network(url, fit: BoxFit.contain)
-              : Image.file(File(url), fit: BoxFit.contain),
-        ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            url,
+            fit: BoxFit.cover,
+            loadingBuilder: (_, child, progress) => progress == null
+                ? child
+                : Container(
+                    color: Colors.grey.shade100,
+                    child: const Center(child: CircularProgressIndicator())),
+            errorBuilder: (_, __, ___) => Container(
+                color: Colors.grey.shade100,
+                child:
+                    const Icon(Icons.broken_image, size: 48, color: Colors.grey)),
+          ),
+          // Camera icon badge top-right
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.photo_rounded,
+                  color: Colors.white, size: 14),
+            ),
+          ),
+          // Tap to expand hint
+          Positioned(
+            bottom: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.zoom_out_map_rounded,
+                  color: Colors.white, size: 14),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-// ── Lazy Video Player ─────────────────────────────────────────────────────────
-// Shows first-frame thumbnail. Only fully initializes audio/playback on tap.
+// ── Carousel Video Tile ──────────────────────────────────────────────────────
 
-class _LazyVideoPlayer extends StatefulWidget {
-  final String videoUrl;
-  const _LazyVideoPlayer({required this.videoUrl});
+class _CarouselVideo extends StatefulWidget {
+  final String path;
+  final VoidCallback onTapFullscreen;
+  const _CarouselVideo(
+      {required this.path, required this.onTapFullscreen});
 
   @override
-  State<_LazyVideoPlayer> createState() => _LazyVideoPlayerState();
+  State<_CarouselVideo> createState() => _CarouselVideoState();
 }
 
-class _LazyVideoPlayerState extends State<_LazyVideoPlayer> {
+class _CarouselVideoState extends State<_CarouselVideo> {
   VideoPlayerController? _controller;
-  bool _thumbnailReady = false; // first frame seeked, ready to show
-  bool _playing = false;        // user has tapped play
-  bool _loading = false;
-  bool _hasError = false;
+  bool _initialized = false;
+  bool _playing = false;
 
   @override
   void initState() {
     super.initState();
-    _loadThumbnail();
+    _init();
   }
 
-  // Initialize controller, seek to frame 0 for thumbnail, then pause.
-  // This is lightweight — no buffering beyond first frame.
-  Future<void> _loadThumbnail() async {
-    try {
-      VideoPlayerController controller;
-      if (widget.videoUrl.startsWith('http')) {
-        controller = VideoPlayerController.networkUrl(
-            Uri.parse(widget.videoUrl));
-      } else {
-        final file = File(widget.videoUrl);
-        if (!file.existsSync()) {
-          if (mounted) setState(() => _hasError = true);
-          return;
-        }
-        controller = VideoPlayerController.file(file);
-      }
-      await controller.initialize();
-      // Seek to start to render first frame as thumbnail
-      await controller.seekTo(Duration.zero);
-      if (!mounted) { controller.dispose(); return; }
-      setState(() {
-        _controller = controller;
-        _thumbnailReady = true;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _hasError = true);
-    }
-  }
-
-  Future<void> _togglePlay() async {
-    if (_controller == null) return;
-    setState(() => _loading = true);
-    try {
-      if (_controller!.value.isPlaying) {
-        await _controller!.pause();
-      } else {
-        await _controller!.play();
-        setState(() => _playing = true);
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  Future<void> _init() async {
+    final ctrl = widget.path.startsWith('http')
+        ? VideoPlayerController.networkUrl(Uri.parse(widget.path))
+        : VideoPlayerController.file(File(widget.path));
+    _controller = ctrl;
+    await ctrl.initialize();
+    await ctrl.seekTo(Duration.zero);
+    if (mounted) setState(() => _initialized = true);
   }
 
   @override
@@ -761,88 +658,274 @@ class _LazyVideoPlayerState extends State<_LazyVideoPlayer> {
     super.dispose();
   }
 
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_hasError) {
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Center(
-          child: Icon(Icons.videocam_off_outlined,
-              color: Colors.grey.shade400, size: 32),
-        ),
-      );
-    }
+    return Container(
+      color: Colors.black,
+      child: !_initialized
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.white))
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                // Video
+                FittedBox(
+                  fit: BoxFit.contain,
+                  child: SizedBox(
+                    width: _controller!.value.size.width,
+                    height: _controller!.value.size.height,
+                    child: VideoPlayer(_controller!),
+                  ),
+                ),
 
-    if (!_thumbnailReady) {
-      // Still loading thumbnail
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-        ),
-      );
-    }
-
-    // Thumbnail ready — show video frame with play overlay
-    return GestureDetector(
-      onTap: _togglePlay,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Video fits within container without cropping
-            FittedBox(
-              fit: BoxFit.contain,
-              child: SizedBox(
-                width: _controller!.value.size.width,
-                height: _controller!.value.size.height,
-                child: VideoPlayer(_controller!),
-              ),
-            ),
-            // Play/pause overlay — hidden when playing, shown when paused
-            ValueListenableBuilder<VideoPlayerValue>(
-              valueListenable: _controller!,
-              builder: (_, value, __) {
-                final showOverlay = !value.isPlaying;
-                return AnimatedOpacity(
-                  opacity: showOverlay ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: Container(
-                    color: Colors.black26,
-                    child: Center(
+                // Play/pause overlay
+                ValueListenableBuilder(
+                  valueListenable: _controller!,
+                  builder: (_, v, __) => GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _playing = !v.isPlaying;
+                        v.isPlaying
+                            ? _controller!.pause()
+                            : _controller!.play();
+                      });
+                    },
+                    child: AnimatedOpacity(
+                      opacity: v.isPlaying ? 0.0 : 1.0,
+                      duration: const Duration(milliseconds: 200),
                       child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
+                        color: Colors.transparent,
+                        child: Center(
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.6),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.play_arrow_rounded,
+                                color: Colors.white, size: 30),
+                          ),
                         ),
-                        child: const Icon(Icons.play_arrow_rounded,
-                            color: Colors.white, size: 36),
                       ),
                     ),
                   ),
-                );
+                ),
+
+                // Video duration badge top-right
+                if (_initialized)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.videocam_rounded,
+                              color: Colors.white, size: 12),
+                          const SizedBox(width: 3),
+                          Text(
+                            _formatDuration(
+                                _controller!.value.duration),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // Fullscreen button bottom-right
+                Positioned(
+                  bottom: 28,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: () {
+                      _controller?.pause();
+                      widget.onTapFullscreen();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(Icons.fullscreen_rounded,
+                          color: Colors.white, size: 18),
+                    ),
+                  ),
+                ),
+
+                // Progress bar
+                Positioned(
+                  bottom: 6,
+                  left: 8,
+                  right: 8,
+                  child: VideoProgressIndicator(
+                    _controller!,
+                    allowScrubbing: true,
+                    colors: const VideoProgressColors(
+                        playedColor: Color(0xFF1A237E),
+                        bufferedColor: Colors.white38,
+                        backgroundColor: Colors.white12),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ── Full Screen Media Viewer ─────────────────────────────────────────────────
+// Unified viewer for images AND videos with swipe between all media
+
+class FullScreenMediaViewer extends StatefulWidget {
+  final List<_MediaItem> items;
+  final int initialIndex;
+  const FullScreenMediaViewer(
+      {super.key, required this.items, required this.initialIndex});
+
+  @override
+  State<FullScreenMediaViewer> createState() => _FullScreenMediaViewerState();
+}
+
+class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
+  late PageController _pageController;
+  late int _current;
+  bool _showUI = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => setState(() => _showUI = !_showUI),
+        child: Stack(
+          children: [
+            // Media pages
+            PageView.builder(
+              controller: _pageController,
+              itemCount: widget.items.length,
+              onPageChanged: (i) => setState(() => _current = i),
+              itemBuilder: (_, i) {
+                final item = widget.items[i];
+                return item.type == _MediaType.image
+                    ? _FullscreenImage(url: item.url)
+                    : _FullscreenVideo(path: item.url);
               },
             ),
-            // Progress bar always at bottom
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: VideoProgressIndicator(
-                _controller!,
-                allowScrubbing: true,
-                colors: const VideoProgressColors(
-                  playedColor: Color(0xFF1A237E),
-                  bufferedColor: Colors.white38,
-                  backgroundColor: Colors.black26,
+
+            // Top bar — close + counter
+            AnimatedOpacity(
+              opacity: _showUI ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      // Close button
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white, size: 28),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      const Spacer(),
+                      // Counter
+                      if (widget.items.length > 1)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '${_current + 1} / ${widget.items.length}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Bottom dot indicators
+            if (widget.items.length > 1)
+              AnimatedOpacity(
+                opacity: _showUI ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Positioned(
+                  bottom: 24,
+                  left: 0,
+                  right: 0,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      widget.items.length,
+                      (i) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        width: _current == i ? 20 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: _current == i
+                              ? Colors.white
+                              : Colors.white38,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            // Media type indicator bottom-left
+            AnimatedOpacity(
+              opacity: _showUI ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: Positioned(
+                bottom: 24,
+                left: 16,
+                child: Icon(
+                  widget.items[_current].type == _MediaType.image
+                      ? Icons.photo_rounded
+                      : Icons.videocam_rounded,
+                  color: Colors.white54,
+                  size: 20,
                 ),
               ),
             ),
@@ -853,65 +936,161 @@ class _LazyVideoPlayerState extends State<_LazyVideoPlayer> {
   }
 }
 
+// ── Fullscreen Image ─────────────────────────────────────────────────────────
 
-// ── Status Badge ──────────────────────────────────────────────────────────────
-
-class _StatusBadge extends StatelessWidget {
-  final ComplaintStatus status;
-  const _StatusBadge({required this.status});
+class _FullscreenImage extends StatelessWidget {
+  final String url;
+  const _FullscreenImage({required this.url});
 
   @override
   Widget build(BuildContext context) {
-    Color color;
-    String label;
-    IconData icon;
-
-    switch (status) {
-      case ComplaintStatus.submitted:
-        color = Colors.blue;
-        label = 'Submitted';
-        icon = Icons.send_rounded;
-        break;
-      case ComplaintStatus.inProgress:
-        color = Colors.orange;
-        label = 'In Progress';
-        icon = Icons.engineering_rounded;
-        break;
-      case ComplaintStatus.resolved:
-        color = Colors.green;
-        label = 'Resolved';
-        icon = Icons.check_circle_rounded;
-        break;
-      case ComplaintStatus.rejected:
-        color = Colors.red;
-        label = 'Rejected';
-        icon = Icons.cancel_rounded;
-        break;
-      default:
-        color = Colors.grey;
-        label = 'Draft';
-        icon = Icons.edit_outlined;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: color,
-                  fontWeight: FontWeight.w600)),
-        ],
+    return InteractiveViewer(
+      minScale: 0.5,
+      maxScale: 5.0,
+      child: Center(
+        child: Image.network(
+          url,
+          fit: BoxFit.contain,
+          loadingBuilder: (_, child, progress) => progress == null
+              ? child
+              : const Center(
+                  child: CircularProgressIndicator(color: Colors.white)),
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+              size: 64, color: Colors.white54),
+        ),
       ),
     );
   }
 }
+
+// ── Fullscreen Video ─────────────────────────────────────────────────────────
+
+class _FullscreenVideo extends StatefulWidget {
+  final String path;
+  const _FullscreenVideo({required this.path});
+
+  @override
+  State<_FullscreenVideo> createState() => _FullscreenVideoState();
+}
+
+class _FullscreenVideoState extends State<_FullscreenVideo> {
+  VideoPlayerController? _controller;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final ctrl = widget.path.startsWith('http')
+        ? VideoPlayerController.networkUrl(Uri.parse(widget.path))
+        : VideoPlayerController.file(File(widget.path));
+    _controller = ctrl;
+    await ctrl.initialize();
+    await ctrl.play(); // auto-play in fullscreen
+    if (mounted) setState(() => _initialized = true);
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.white));
+    }
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Video fills screen
+        Center(
+          child: AspectRatio(
+            aspectRatio: _controller!.value.aspectRatio,
+            child: VideoPlayer(_controller!),
+          ),
+        ),
+
+        // Play/pause on tap
+        ValueListenableBuilder(
+          valueListenable: _controller!,
+          builder: (_, v, __) => GestureDetector(
+            onTap: () => setState(() =>
+                v.isPlaying ? _controller!.pause() : _controller!.play()),
+            child: AnimatedOpacity(
+              opacity: v.isPlaying ? 0.0 : 1.0,
+              duration: const Duration(milliseconds: 200),
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.play_arrow_rounded,
+                    color: Colors.white, size: 44),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom controls
+        Positioned(
+          bottom: 48,
+          left: 16,
+          right: 16,
+          child: Column(
+            children: [
+              // Progress bar
+              VideoProgressIndicator(
+                _controller!,
+                allowScrubbing: true,
+                colors: const VideoProgressColors(
+                    playedColor: Colors.white,
+                    bufferedColor: Colors.white38,
+                    backgroundColor: Colors.white24),
+              ),
+              const SizedBox(height: 6),
+              // Duration display
+              ValueListenableBuilder(
+                valueListenable: _controller!,
+                builder: (_, v, __) => Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDuration(v.position),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    Text(
+                      _formatDuration(v.duration),
+                      style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
