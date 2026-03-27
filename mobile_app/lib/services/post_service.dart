@@ -111,4 +111,19 @@ class PostService {
         .where((post) => post.isPublic)
         .toList());
   }
+
+  // ── My Complaints ─────────────────────────────────────────────────────────
+
+  /// Returns real-time stream of all complaints submitted by [userId],
+  /// newest first, regardless of public/private or status.
+  Stream<List<PostModel>> myComplaintsStream(String userId) {
+    return _db
+        .collection('complaints')
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => PostModel.fromFirestore(doc.data(), doc.id))
+            .toList());
+  }
 }

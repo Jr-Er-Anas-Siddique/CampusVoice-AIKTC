@@ -75,7 +75,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     _isOnCampus = draft.isOnCampus;
     _isPublic = draft.isPublic;
 
-    // Load existing draft videos
+    // Load existing draft videos only if file still exists on device
     for (final path in draft.videoPaths) {
       final file = File(path);
       if (file.existsSync()) {
@@ -86,6 +86,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         _initVideoController(index, file);
       }
     }
+    // Note: images/videos may not restore if Android cleared the temp cache.
+    // This is shown as an info banner in the UI.
   }
 
   Future<void> _initVideoController(int index, File file) async {
@@ -854,6 +856,37 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                 ),
                 const SizedBox(height: 16),
               ],
+
+              // ── Draft media notice ────────────────────────────────────
+              if (widget.existingDraft != null &&
+                  (widget.existingDraft!.localImagePaths.isNotEmpty ||
+                      widget.existingDraft!.videoPaths.isNotEmpty))
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded,
+                          color: Colors.amber.shade700, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Media files from your draft could not be restored as they were cleared by your device. Please re-attach your images and videos.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.amber.shade800,
+                              height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // ── Section 5: Evidence Images ────────────────────────────
               _SectionCard(

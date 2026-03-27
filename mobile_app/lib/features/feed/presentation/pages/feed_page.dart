@@ -9,6 +9,7 @@ import '../../../../services/auth_service.dart';
 import '../../../../services/social_service.dart';
 import '../../../posts/presentation/pages/report_issue_page.dart';
 import 'complaint_detail_page.dart';
+import 'my_complaints_page.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -53,6 +54,14 @@ class _FeedPageState extends State<FeedPage> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.assignment_outlined, color: Colors.white),
+            tooltip: 'My Complaints',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => const MyComplaintsPage()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white),
             onPressed: () => AuthService.instance.signOut(),
