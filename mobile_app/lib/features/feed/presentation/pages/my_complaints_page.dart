@@ -1,6 +1,7 @@
 // lib/features/feed/presentation/pages/my_complaints_page.dart
 
 import 'package:flutter/material.dart';
+import '../../../../main.dart' show AppColors, draftRefreshNotifier;
 import '../../../../models/post_model.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/post_service.dart';
@@ -15,24 +16,47 @@ class MyComplaintsPage extends StatefulWidget {
 }
 
 class _MyComplaintsPageState extends State<MyComplaintsPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   List<PostModel> _drafts = [];
   bool _loadingDrafts = true;
-  ComplaintStatus? _statusFilter; // null = show all
+  ComplaintStatus? _statusFilter;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 2, vsync: this);
     _loadDrafts();
     _tabController.addListener(() => setState(() {}));
+    // Listen for draft saves/submits from ReportIssuePage
+    draftRefreshNotifier.addListener(_loadDrafts);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    draftRefreshNotifier.removeListener(_loadDrafts);
     _tabController.dispose();
     super.dispose();
+  }
+
+  // Reload drafts whenever app comes back to foreground
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadDrafts();
+  }
+
+  String _statusFilterLabel() {
+    switch (_statusFilter) {
+      case ComplaintStatus.pendingReview: return 'pending review';
+      case ComplaintStatus.underReview:   return 'under review';
+      case ComplaintStatus.inProgress:    return 'in progress';
+      case ComplaintStatus.resolved:      return 'resolved';
+      case ComplaintStatus.rejected:      return 'rejected';
+      case ComplaintStatus.flagged:       return 'flagged';
+      default:                            return 'matching';
+    }
   }
 
   Future<void> _loadDrafts() async {
@@ -81,14 +105,11 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
     final uid = AuthService.instance.currentUser?.uid ?? '';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        automaticallyImplyLeading: false,
         title: const Text('My Complaints',
             style: TextStyle(
                 color: Colors.white,
@@ -132,20 +153,7 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                 return _EmptyState(
                   icon: Icons.assignment_outlined,
                   title: 'No complaints yet',
-                  subtitle: 'Tap "Report Issue" to submit your first complaint',
-                  action: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const ReportIssuePage())),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Report Issue'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A237E),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
+                  subtitle: 'Tap the + button below to report your first issue',
                 );
               }
 
@@ -172,60 +180,47 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                             count: all.length,
                             color: const Color(0xFF1A237E),
                             selected: _statusFilter == null,
-                            onTap: () =>
-                                setState(() => _statusFilter = null),
+                            onTap: () => setState(() => _statusFilter = null),
                           ),
                           const SizedBox(width: 8),
                           _SummaryChip(
-                            label: 'Pending',
-                            count: all
-                                .where((p) =>
-                                    p.status == ComplaintStatus.submitted)
-                                .length,
+                            label: 'Pending Review',
+                            count: all.where((p) => p.status == ComplaintStatus.pendingReview).length,
                             color: Colors.orange,
-                            selected:
-                                _statusFilter == ComplaintStatus.submitted,
-                            onTap: () => setState(() =>
-                                _statusFilter = ComplaintStatus.submitted),
+                            selected: _statusFilter == ComplaintStatus.pendingReview,
+                            onTap: () => setState(() => _statusFilter = ComplaintStatus.pendingReview),
+                          ),
+                          const SizedBox(width: 8),
+                          _SummaryChip(
+                            label: 'Under Review',
+                            count: all.where((p) => p.status == ComplaintStatus.underReview).length,
+                            color: Colors.blueGrey,
+                            selected: _statusFilter == ComplaintStatus.underReview,
+                            onTap: () => setState(() => _statusFilter = ComplaintStatus.underReview),
                           ),
                           const SizedBox(width: 8),
                           _SummaryChip(
                             label: 'In Progress',
-                            count: all
-                                .where((p) =>
-                                    p.status == ComplaintStatus.inProgress)
-                                .length,
+                            count: all.where((p) => p.status == ComplaintStatus.inProgress).length,
                             color: Colors.blue,
-                            selected:
-                                _statusFilter == ComplaintStatus.inProgress,
-                            onTap: () => setState(() =>
-                                _statusFilter = ComplaintStatus.inProgress),
+                            selected: _statusFilter == ComplaintStatus.inProgress,
+                            onTap: () => setState(() => _statusFilter = ComplaintStatus.inProgress),
                           ),
                           const SizedBox(width: 8),
                           _SummaryChip(
                             label: 'Resolved',
-                            count: all
-                                .where((p) =>
-                                    p.status == ComplaintStatus.resolved)
-                                .length,
+                            count: all.where((p) => p.status == ComplaintStatus.resolved).length,
                             color: Colors.green,
-                            selected:
-                                _statusFilter == ComplaintStatus.resolved,
-                            onTap: () => setState(() =>
-                                _statusFilter = ComplaintStatus.resolved),
+                            selected: _statusFilter == ComplaintStatus.resolved,
+                            onTap: () => setState(() => _statusFilter = ComplaintStatus.resolved),
                           ),
                           const SizedBox(width: 8),
                           _SummaryChip(
                             label: 'Rejected',
-                            count: all
-                                .where((p) =>
-                                    p.status == ComplaintStatus.rejected)
-                                .length,
+                            count: all.where((p) => p.status == ComplaintStatus.rejected).length,
                             color: Colors.red,
-                            selected:
-                                _statusFilter == ComplaintStatus.rejected,
-                            onTap: () => setState(() =>
-                                _statusFilter = ComplaintStatus.rejected),
+                            selected: _statusFilter == ComplaintStatus.rejected,
+                            onTap: () => setState(() => _statusFilter = ComplaintStatus.rejected),
                           ),
                         ],
                       ),
@@ -239,13 +234,13 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                     child: complaints.isEmpty
                         ? _EmptyState(
                             icon: Icons.filter_list_off_rounded,
-                            title: 'No ${_statusFilter == ComplaintStatus.submitted ? 'pending' : _statusFilter == ComplaintStatus.inProgress ? 'in progress' : _statusFilter == ComplaintStatus.resolved ? 'resolved' : 'rejected'} complaints',
+                            title: 'No ${_statusFilterLabel()} complaints',
                             subtitle: 'Try a different filter',
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.all(12),
                             itemCount: complaints.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const SizedBox(height: 8),
                             itemBuilder: (_, i) => _ComplaintTile(
                               post: complaints[i],
@@ -279,7 +274,7 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                       child: ListView.separated(
                         padding: const EdgeInsets.all(12),
                         itemCount: _drafts.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
                         itemBuilder: (_, i) => _DraftTile(
                           draft: _drafts[i],
                           onEdit: () async {
@@ -297,18 +292,6 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                     ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF1A237E),
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Report Issue',
-            style: TextStyle(fontWeight: FontWeight.w600)),
-        onPressed: () async {
-          await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReportIssuePage()));
-          _loadDrafts();
-        },
-      ),
     );
   }
 }
@@ -322,31 +305,40 @@ class _ComplaintTile extends StatelessWidget {
 
   Color _statusColor(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return Colors.orange;
-      case ComplaintStatus.inProgress: return Colors.blue;
-      case ComplaintStatus.resolved: return Colors.green;
-      case ComplaintStatus.rejected: return Colors.red;
-      default: return Colors.grey;
+      case ComplaintStatus.pendingReview: return Colors.orange;
+      case ComplaintStatus.approved:      return Colors.blue;
+      case ComplaintStatus.underReview:   return Colors.blueGrey;
+      case ComplaintStatus.inProgress:    return Colors.blue;
+      case ComplaintStatus.resolved:      return Colors.green;
+      case ComplaintStatus.rejected:      return Colors.red;
+      case ComplaintStatus.flagged:       return Colors.deepOrange;
+      default:                            return Colors.grey;
     }
   }
 
   String _statusLabel(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return 'Pending';
-      case ComplaintStatus.inProgress: return 'In Progress';
-      case ComplaintStatus.resolved: return 'Resolved';
-      case ComplaintStatus.rejected: return 'Rejected';
-      default: return 'Unknown';
+      case ComplaintStatus.pendingReview: return 'Pending Review';
+      case ComplaintStatus.approved:      return 'Approved';
+      case ComplaintStatus.underReview:   return 'Under Review';
+      case ComplaintStatus.inProgress:    return 'In Progress';
+      case ComplaintStatus.resolved:      return 'Resolved';
+      case ComplaintStatus.rejected:      return 'Rejected';
+      case ComplaintStatus.flagged:       return 'Flagged';
+      default:                            return 'Unknown';
     }
   }
 
   IconData _statusIcon(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return Icons.hourglass_top_rounded;
-      case ComplaintStatus.inProgress: return Icons.autorenew_rounded;
-      case ComplaintStatus.resolved: return Icons.check_circle_rounded;
-      case ComplaintStatus.rejected: return Icons.cancel_rounded;
-      default: return Icons.help_outline_rounded;
+      case ComplaintStatus.pendingReview: return Icons.hourglass_top_rounded;
+      case ComplaintStatus.approved:      return Icons.thumb_up_outlined;
+      case ComplaintStatus.underReview:   return Icons.manage_search_rounded;
+      case ComplaintStatus.inProgress:    return Icons.autorenew_rounded;
+      case ComplaintStatus.resolved:      return Icons.check_circle_rounded;
+      case ComplaintStatus.rejected:      return Icons.cancel_rounded;
+      case ComplaintStatus.flagged:       return Icons.flag_rounded;
+      default:                            return Icons.help_outline_rounded;
     }
   }
 
@@ -530,11 +522,14 @@ class _ComplaintTile extends StatelessWidget {
 
   double _progressValue(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return 0.25;
-      case ComplaintStatus.inProgress: return 0.65;
-      case ComplaintStatus.resolved: return 1.0;
-      case ComplaintStatus.rejected: return 1.0;
-      default: return 0.0;
+      case ComplaintStatus.pendingReview: return 0.15;
+      case ComplaintStatus.approved:      return 0.30;
+      case ComplaintStatus.underReview:   return 0.50;
+      case ComplaintStatus.inProgress:    return 0.75;
+      case ComplaintStatus.resolved:      return 1.0;
+      case ComplaintStatus.rejected:      return 1.0;
+      case ComplaintStatus.flagged:       return 0.15;
+      default:                            return 0.0;
     }
   }
 }
@@ -607,8 +602,7 @@ class _DraftTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (draft.category != null)
-                  Row(
+                Row(
                     children: [
                       Text(draft.category.icon,
                           style: const TextStyle(fontSize: 13)),

@@ -1,6 +1,15 @@
 // lib/models/post_model.dart
 
-enum ComplaintStatus { draft, submitted, inProgress, resolved, rejected }
+enum ComplaintStatus {
+  draft,          // saved locally, not submitted
+  pendingReview,  // submitted, waiting for system moderation
+  approved,       // passed moderation, visible in public feed
+  underReview,    // committee picked it up
+  inProgress,     // committee actively working on it
+  resolved,       // issue resolved
+  rejected,       // failed moderation or committee rejected
+  flagged,        // flagged by system moderator (hidden from feed)
+}
 
 enum ComplaintCategory {
   infrastructure,
@@ -95,7 +104,7 @@ class StatusHistoryEntry {
       StatusHistoryEntry(
         status: ComplaintStatus.values.firstWhere(
           (e) => e.name == map['status'],
-          orElse: () => ComplaintStatus.submitted,
+          orElse: () => ComplaintStatus.pendingReview,
         ),
         changedAt: DateTime.parse(map['changedAt']),
         changedBy: map['changedBy'] ?? '',
@@ -144,6 +153,11 @@ class PostModel {
   final String? assignedCommittee;
   final List<StatusHistoryEntry> statusHistory;
 
+  // Moderation
+  final String? moderationNote;  // set by system moderator on flag/reject
+  final String? resolutionNote;  // set by committee on resolve
+  final int occurrenceCount;     // how many times this issue was reported before
+
   const PostModel({
     this.id,
     required this.userId,
@@ -168,6 +182,9 @@ class PostModel {
     this.commentCount = 0,
     this.assignedCommittee,
     this.statusHistory = const [],
+    this.moderationNote,
+    this.resolutionNote,
+    this.occurrenceCount = 0,
   });
 
   bool get isDraft => status == ComplaintStatus.draft;
@@ -205,6 +222,9 @@ class PostModel {
     int? commentCount,
     String? assignedCommittee,
     List<StatusHistoryEntry>? statusHistory,
+    String? moderationNote,
+    String? resolutionNote,
+    int? occurrenceCount,
   }) {
     return PostModel(
       id: id ?? this.id,
@@ -230,6 +250,9 @@ class PostModel {
       commentCount: commentCount ?? this.commentCount,
       assignedCommittee: assignedCommittee ?? this.assignedCommittee,
       statusHistory: statusHistory ?? this.statusHistory,
+      moderationNote: moderationNote ?? this.moderationNote,
+      resolutionNote: resolutionNote ?? this.resolutionNote,
+      occurrenceCount: occurrenceCount ?? this.occurrenceCount,
     );
   }
 
@@ -260,6 +283,9 @@ class PostModel {
     if (gpsCoordinates != null) map['gpsCoordinates'] = gpsCoordinates!.toMap();
     if (videoPaths.isNotEmpty) map['videoPaths'] = videoPaths;
     if (assignedCommittee != null) map['assignedCommittee'] = assignedCommittee;
+    if (moderationNote != null) map['moderationNote'] = moderationNote;
+    if (resolutionNote != null) map['resolutionNote'] = resolutionNote;
+    if (occurrenceCount > 0) map['occurrenceCount'] = occurrenceCount;
 
     return map;
   }
@@ -288,7 +314,7 @@ class PostModel {
       isOnCampus: map['isOnCampus'],
       status: ComplaintStatus.values.firstWhere(
         (e) => e.name == map['status'],
-        orElse: () => ComplaintStatus.draft,
+        orElse: () => ComplaintStatus.pendingReview,
       ),
       isPublic: map['isPublic'] ?? true,
       createdAt: DateTime.parse(map['createdAt']),
@@ -296,6 +322,9 @@ class PostModel {
       supportCount: (map['supportCount'] ?? 0) as int,
       commentCount: (map['commentCount'] ?? 0) as int,
       assignedCommittee: map['assignedCommittee'],
+      moderationNote: map['moderationNote'],
+      resolutionNote: map['resolutionNote'],
+      occurrenceCount: (map['occurrenceCount'] ?? 0) as int,
       statusHistory: (map['statusHistory'] as List<dynamic>? ?? [])
           .map((e) => StatusHistoryEntry.fromMap(Map<String, dynamic>.from(e)))
           .toList(),

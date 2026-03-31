@@ -1,14 +1,12 @@
 // lib/features/feed/presentation/pages/complaint_detail_page.dart
 
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:video_player/video_player.dart';
 import '../../../../models/post_model.dart';
 import '../../../../models/comment_model.dart';
 import '../../../../services/social_service.dart';
 import '../../../../services/auth_service.dart';
-import 'feed_page.dart' show FeedMediaCarousel, FullScreenMediaViewer;
+import 'feed_page.dart' show FeedMediaCarousel;
 
 class ComplaintDetailPage extends StatefulWidget {
   final PostModel post;
@@ -58,21 +56,27 @@ class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
 
   Color _statusColor(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return Colors.orange;
-      case ComplaintStatus.inProgress: return Colors.blue;
-      case ComplaintStatus.resolved: return Colors.green;
-      case ComplaintStatus.rejected: return Colors.red;
-      default: return Colors.grey;
+      case ComplaintStatus.pendingReview: return Colors.orange;
+      case ComplaintStatus.approved:      return Colors.blue;
+      case ComplaintStatus.underReview:   return Colors.blueGrey;
+      case ComplaintStatus.inProgress:    return Colors.blue;
+      case ComplaintStatus.resolved:      return Colors.green;
+      case ComplaintStatus.rejected:      return Colors.red;
+      case ComplaintStatus.flagged:       return Colors.deepOrange;
+      default:                            return Colors.grey;
     }
   }
 
   String _statusLabel(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.submitted: return 'Pending';
-      case ComplaintStatus.inProgress: return 'In Progress';
-      case ComplaintStatus.resolved: return 'Resolved';
-      case ComplaintStatus.rejected: return 'Rejected';
-      default: return 'Draft';
+      case ComplaintStatus.pendingReview: return 'Pending Review';
+      case ComplaintStatus.approved:      return 'Approved';
+      case ComplaintStatus.underReview:   return 'Under Review';
+      case ComplaintStatus.inProgress:    return 'In Progress';
+      case ComplaintStatus.resolved:      return 'Resolved';
+      case ComplaintStatus.rejected:      return 'Rejected';
+      case ComplaintStatus.flagged:       return 'Flagged';
+      default:                            return 'Draft';
     }
   }
 

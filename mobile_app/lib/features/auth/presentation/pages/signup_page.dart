@@ -5,7 +5,6 @@ import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
 // import 'package:mobile_app/features/auth/presentation/pages/verify_email_page.dart';
 import '../../../../services/auth_service.dart';
 import 'login_page.dart';
-import '../../../../main.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -164,7 +163,7 @@ class _SignupPageState extends State<SignupPage> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.indigo.withOpacity(0.08),
+            color: Colors.indigo.withValues(alpha: 0.08),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),

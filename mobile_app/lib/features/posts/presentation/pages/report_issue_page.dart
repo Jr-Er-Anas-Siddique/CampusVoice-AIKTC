@@ -12,6 +12,7 @@ import '../../../../config/campus_locations.dart';
 import '../../../../config/complaint_categories.dart';
 import '../../../../core/utils/campus_boundary.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../main.dart' show draftRefreshNotifier;
 
 class ReportIssuePage extends StatefulWidget {
   final PostModel? existingDraft;
@@ -75,7 +76,15 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     _isOnCampus = draft.isOnCampus;
     _isPublic = draft.isPublic;
 
-    // Load existing draft videos only if file still exists on device
+    // Restore images if files still exist on device
+    for (final path in draft.localImagePaths) {
+      final file = File(path);
+      if (file.existsSync()) {
+        _selectedImages.add(file);
+      }
+    }
+
+    // Restore videos if files still exist on device
     for (final path in draft.videoPaths) {
       final file = File(path);
       if (file.existsSync()) {
@@ -86,8 +95,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         _initVideoController(index, file);
       }
     }
-    // Note: images/videos may not restore if Android cleared the temp cache.
-    // This is shown as an info banner in the UI.
+    // Note: media files may not restore if Android cleared the temp cache.
+    // A warning banner is shown in that case.
   }
 
   Future<void> _initVideoController(int index, File file) async {
@@ -153,7 +162,9 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         return;
       }
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       final coords = GpsCoordinates(
         latitude: position.latitude,
@@ -360,7 +371,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         gpsCoordinates: _gpsCoordinates,
         isOnCampus: _isOnCampus,
         isPublic: _isPublic,
-        status: ComplaintStatus.submitted,
+        status: ComplaintStatus.pendingReview,
         createdAt: widget.existingDraft?.createdAt ?? now,
         updatedAt: now,
       );
@@ -371,6 +382,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       );
 
       if (mounted) {
+        draftRefreshNotifier.value++;
         _showSnack('Complaint submitted successfully!', isSuccess: true);
         Navigator.of(context).pop(true);
       }
@@ -401,7 +413,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         category: _selectedCategory ?? ComplaintCategory.other,
-        building: _selectedBuilding ?? CampusLocations.allLocations.first,
+        building: _selectedBuilding ?? '',
         floor: _selectedFloor,
         roomNumber: _roomController.text.trim().isEmpty
             ? null
@@ -417,6 +429,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       );
 
       await PostService.instance.saveDraft(draft);
+      draftRefreshNotifier.value++;
       if (mounted) {
         _showSnack('Draft saved.', isSuccess: true);
         Navigator.of(context).pop(true);
@@ -441,16 +454,87 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     );
   }
 
+  bool get _hasContent =>
+      _titleController.text.trim().isNotEmpty ||
+      _descriptionController.text.trim().isNotEmpty ||
+      _selectedCategory != null ||
+      _selectedImages.isNotEmpty ||
+      _selectedVideos.isNotEmpty;
+
+  // True only when draft had media paths but files no longer exist on device
+  bool get _hasMissingDraftMedia {
+    final draft = widget.existingDraft;
+    if (draft == null) return false;
+    final draftImageCount = draft.localImagePaths.length;
+    final draftVideoCount = draft.videoPaths.length;
+    if (draftImageCount == 0 && draftVideoCount == 0) return false;
+    // If restored counts match draft counts, no media is missing
+    return _selectedImages.length < draftImageCount ||
+        _selectedVideos.length < draftVideoCount;
+  }
+
+  Future<bool> _onWillPop() async {
+    if (!_hasContent) return true;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Leave this page?',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+        content: const Text(
+            'You have unsaved changes. Would you like to save as a draft or discard?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'discard'),
+            child: Text('Discard',
+                style: TextStyle(color: Colors.red.shade400)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'draft'),
+            child: const Text('Save Draft',
+                style: TextStyle(
+                    color: Color(0xFF1A237E),
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (result == 'draft') {
+      await _saveDraft();
+      return true;
+    }
+    return result == 'discard';
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FF),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              color: Colors.white),
+          onPressed: () async {
+            final shouldPop = await _onWillPop();
+            if (shouldPop && mounted) Navigator.of(context).pop();
+          },
+        ),
         title: Text(
           widget.existingDraft != null ? 'Edit Draft' : 'Report an Issue',
           style:
@@ -857,10 +941,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                 const SizedBox(height: 16),
               ],
 
-              // ── Draft media notice ────────────────────────────────────
-              if (widget.existingDraft != null &&
-                  (widget.existingDraft!.localImagePaths.isNotEmpty ||
-                      widget.existingDraft!.videoPaths.isNotEmpty))
+              // ── Draft media notice — only if media failed to restore ───
+              if (widget.existingDraft != null && _hasMissingDraftMedia)
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(12),
@@ -1035,8 +1117,9 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
             ],
           ),
         ),
-      ),
-    );
+      ), // closes Scaffold
+    ), // closes child: parameter of PopScope
+  ); // closes PopScope / return
   }
 
   InputDecoration _inputDeco(
@@ -1068,7 +1151,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
               const BorderSide(color: Colors.redAccent, width: 1.5)),
     );
   }
-}
+} // closes _ReportIssuePageState
 
 // ── Reusable Widgets ──────────────────────────────────────────────────────────
 
@@ -1091,7 +1174,7 @@ class _SectionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.indigo.withOpacity(0.08),
+            color: Colors.indigo.withValues(alpha: 0.08),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -1278,7 +1361,7 @@ class _StyledDropdown<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
-      value: value,
+      initialValue: value,
       onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hint,
@@ -1400,7 +1483,7 @@ class _VideoPreviewTile extends StatelessWidget {
                   builder: (ctx, setLocalState) {
                     return ValueListenableBuilder<VideoPlayerValue>(
                       valueListenable: controller!,
-                      builder: (_, value, __) => Icon(
+                      builder: (_, value, _) => Icon(
                         value.isPlaying
                             ? Icons.pause_rounded
                             : Icons.play_arrow_rounded,

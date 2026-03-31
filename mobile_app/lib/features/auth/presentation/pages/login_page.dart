@@ -8,7 +8,6 @@ import '../../../../services/auth_service.dart';
 import 'signup_page.dart';
 // import 'package:firebase_auth/firebase_auth.dart';
 // import 'verify_email_page.dart';
-import '../../../../main.dart'; // for HomePage
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -47,7 +46,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      final user = await AuthService.instance.signIn(
+      await AuthService.instance.signIn(
         email: _emailController.text,
         password: _passwordController.text,
       );
@@ -191,7 +190,7 @@ class _LoginPageState extends State<LoginPage> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.indigo.withOpacity(0.08),
+            color: Colors.indigo.withValues(alpha: 0.08),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),

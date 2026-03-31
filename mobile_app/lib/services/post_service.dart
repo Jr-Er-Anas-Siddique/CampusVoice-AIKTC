@@ -15,20 +15,26 @@ class PostService {
 
   // ── Submit ───────────────────────────────────────────────────────────────
 
-  /// Submits a complaint to Firestore.
-  /// Images and videos are already uploaded by report_issue_page before calling this.
-  /// post.imageUrls and post.videoPaths already contain Cloudinary URLs.
+  /// Submits a complaint to Firestore with pendingReview status.
+  /// System moderator will approve/reject it before it appears in feed.
   Future<String> submitComplaint({
     required PostModel post,
     required List<File> imageFiles, // ignored — already uploaded by caller
   }) async {
-    // Use docId already set in report_issue_page, or generate new one
     final docId = post.id ?? _db.collection('complaints').doc().id;
 
     final submitted = post.copyWith(
       id: docId,
-      status: ComplaintStatus.submitted,
+      status: ComplaintStatus.pendingReview,
       updatedAt: DateTime.now(),
+      statusHistory: [
+        StatusHistoryEntry(
+          status: ComplaintStatus.pendingReview,
+          changedAt: DateTime.now(),
+          changedBy: post.userName,
+          note: 'Issue submitted for review',
+        ),
+      ],
     );
 
     await _db.collection('complaints').doc(docId).set(submitted.toFirestore());
@@ -95,11 +101,12 @@ class PostService {
 
   // ── Feed query ────────────────────────────────────────────────────────────
 
-  /// Returns a stream of submitted public complaints ordered by newest first.
+  /// Returns a stream of approved public complaints ordered by newest first.
+  /// Only approved complaints (passed moderation) appear in the public feed.
   Stream<List<PostModel>> feedStream({ComplaintCategory? category}) {
     Query<Map<String, dynamic>> query = _db
         .collection('complaints')
-        .where('status', isEqualTo: 'submitted')
+        .where('status', isEqualTo: 'approved')
         .orderBy('createdAt', descending: true);
 
     if (category != null) {

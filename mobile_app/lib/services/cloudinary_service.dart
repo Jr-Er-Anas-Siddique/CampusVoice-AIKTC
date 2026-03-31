@@ -10,6 +10,7 @@
 // 4. Replace YOUR_CLOUD_NAME below with your actual cloud name from dashboard
 
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'dart:convert';
@@ -48,7 +49,7 @@ class CloudinaryService {
 
     for (int i = 0; i < files.length; i++) {
       try {
-        print('DEBUG: Uploading image ${i + 1}/${files.length}...');
+        debugPrint('DEBUG: Uploading image ${i + 1}/${files.length}...');
         final url = await _uploadFile(
           file: files[i],
           uploadUrl: _imageUploadUrl,
@@ -58,7 +59,7 @@ class CloudinaryService {
         urls.add(url);
       } catch (e) {
         // THIS WILL FINALLY SHOW YOU THE ERROR IN THE TERMINAL
-        print('❌ CLOUDINARY UPLOAD FAILED: $e');
+        debugPrint('❌ CLOUDINARY UPLOAD FAILED: $e');
         rethrow; // Send the error up so the app knows it failed
       }
     }

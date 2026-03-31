@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
-import 'package:mobile_app/main.dart';
 import '../../../../services/auth_service.dart';
 
 class VerifyEmailPage extends StatefulWidget {
