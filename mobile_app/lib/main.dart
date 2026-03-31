@@ -9,6 +9,7 @@ import 'features/auth/presentation/pages/login_page.dart';
 import 'features/feed/presentation/pages/feed_page.dart';
 import 'features/feed/presentation/pages/my_complaints_page.dart';
 import 'features/posts/presentation/pages/report_issue_page.dart';
+import 'features/profile/presentation/pages/user_profile_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -162,11 +163,15 @@ class _MainShellState extends State<MainShell> {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: const [
-          RepaintBoundary(child: FeedPage()),
-          RepaintBoundary(child: MyComplaintsPage()),
-          RepaintBoundary(child: _NotificationsPage()),
-          RepaintBoundary(child: _ProfilePlaceholder()),
+        children: [
+          const RepaintBoundary(child: FeedPage()),
+          const RepaintBoundary(child: MyComplaintsPage()),
+          const RepaintBoundary(child: _NotificationsPage()),
+          RepaintBoundary(
+            child: UserProfilePage(
+              onSwitchTab: (i) => setState(() => _currentIndex = i),
+            ),
+          ),
         ],
       ),
       floatingActionButton: _CenterFAB(
@@ -404,206 +409,6 @@ class _NotificationsPage extends StatelessWidget {
   }
 }
 
-// ── Profile Placeholder ───────────────────────────────────────────────────────
-class _ProfilePlaceholder extends StatelessWidget {
-  const _ProfilePlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final name = user?.displayName ?? 'Student';
-    final email = user?.email ?? '';
-
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              // Header
-              Container(
-                width: double.infinity,
-                color: AppColors.surface,
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-                child: Column(
-                  children: [
-                    // Avatar
-                    Container(
-                      width: 88,
-                      height: 88,
-                      decoration: BoxDecoration(
-                        color: AppColors.accentLight,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: AppColors.border, width: 3),
-                      ),
-                      child: Center(
-                        child: Text(
-                          name.isNotEmpty ? name[0].toUpperCase() : 'S',
-                          style: const TextStyle(
-                              fontSize: 36,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(name,
-                        style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textDark)),
-                    const SizedBox(height: 4),
-                    Text(email,
-                        style: const TextStyle(
-                            fontSize: 13, color: AppColors.textMid)),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.accentLight,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                          'Full profile — coming soon in next update',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.accent,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              // Menu items
-              Container(
-                color: AppColors.surface,
-                child: Column(
-                  children: [
-                    _MenuItem(
-                      icon: Icons.person_outline_rounded,
-                      label: 'Personal Information',
-                      onTap: () {},
-                    ),
-                    _MenuItem(
-                      icon: Icons.assignment_outlined,
-                      label: 'My Complaints',
-                      onTap: () {},
-                    ),
-                    _MenuItem(
-                      icon: Icons.notifications_none_rounded,
-                      label: 'Notification Settings',
-                      onTap: () {},
-                    ),
-                    _MenuItem(
-                      icon: Icons.help_outline_rounded,
-                      label: 'Help & Support',
-                      onTap: () {},
-                    ),
-                    _MenuItem(
-                      icon: Icons.logout_rounded,
-                      label: 'Sign Out',
-                      isDestructive: true,
-                      onTap: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (_) => AlertDialog(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            title: const Text('Sign Out'),
-                            content: const Text(
-                                'Are you sure you want to sign out?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(context, false),
-                                child: const Text('Cancel'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () =>
-                                    Navigator.pop(context, true),
-                                style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.rejected),
-                                child: const Text('Sign Out'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirm == true) {
-                          await FirebaseAuth.instance.signOut();
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MenuItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isDestructive;
-
-  const _MenuItem({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.isDestructive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isDestructive ? AppColors.rejected : AppColors.textDark;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: const BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: AppColors.border, width: 0.5),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isDestructive
-                    ? AppColors.redTint
-                    : AppColors.accentLight,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon,
-                  size: 18,
-                  color: isDestructive ? AppColors.rejected : AppColors.accent),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: color)),
-            ),
-            Icon(Icons.chevron_right_rounded,
-                size: 20, color: AppColors.textLight),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ── Splash Screen ─────────────────────────────────────────────────────────────
 class _SplashScreen extends StatelessWidget {
