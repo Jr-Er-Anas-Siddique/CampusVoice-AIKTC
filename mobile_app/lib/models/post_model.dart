@@ -14,6 +14,7 @@ enum ComplaintStatus {
 enum ComplaintCategory {
   infrastructure,
   academic,
+  library,
   administrative,
   safety,
   other,
@@ -22,31 +23,23 @@ enum ComplaintCategory {
 extension ComplaintCategoryExt on ComplaintCategory {
   String get label {
     switch (this) {
-      case ComplaintCategory.infrastructure:
-        return 'Infrastructure';
-      case ComplaintCategory.academic:
-        return 'Academic';
-      case ComplaintCategory.administrative:
-        return 'Administrative';
-      case ComplaintCategory.safety:
-        return 'Safety';
-      case ComplaintCategory.other:
-        return 'Other';
+      case ComplaintCategory.infrastructure: return 'Infrastructure';
+      case ComplaintCategory.academic:       return 'Academic';
+      case ComplaintCategory.library:        return 'Library';
+      case ComplaintCategory.administrative: return 'Administrative';
+      case ComplaintCategory.safety:         return 'Safety';
+      case ComplaintCategory.other:          return 'Other';
     }
   }
 
   String get icon {
     switch (this) {
-      case ComplaintCategory.infrastructure:
-        return '🏗️';
-      case ComplaintCategory.academic:
-        return '📚';
-      case ComplaintCategory.administrative:
-        return '📋';
-      case ComplaintCategory.safety:
-        return '🛡️';
-      case ComplaintCategory.other:
-        return '📌';
+      case ComplaintCategory.infrastructure: return '🏗️';
+      case ComplaintCategory.academic:       return '📚';
+      case ComplaintCategory.library:        return '📖';
+      case ComplaintCategory.administrative: return '📋';
+      case ComplaintCategory.safety:         return '🛡️';
+      case ComplaintCategory.other:          return '📌';
     }
   }
 }

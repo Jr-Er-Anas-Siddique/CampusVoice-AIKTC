@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/post_model.dart';
+import 'moderation_service.dart';
 
 class PostService {
   PostService._();
@@ -15,36 +16,79 @@ class PostService {
 
   // ── Submit ───────────────────────────────────────────────────────────────
 
-  /// Submits a complaint to Firestore with pendingReview status.
-  /// System moderator will approve/reject it before it appears in feed.
-  Future<String> submitComplaint({
+  /// Submits a complaint. Runs system moderation immediately after saving.
+  /// If approved       → status: approved, appears in public feed
+  /// If autoPrivate    → status: approved, isPublic: false, committee only
+  /// If flagged        → status: flagged, hidden from feed + committee
+  Future<ModerationResult> submitComplaint({
     required PostModel post,
-    required List<File> imageFiles, // ignored — already uploaded by caller
+    required List<File> imageFiles,
   }) async {
     final docId = post.id ?? _db.collection('complaints').doc().id;
+    final now = DateTime.now();
 
-    final submitted = post.copyWith(
+    // Step 1 — Save as pendingReview
+    // Use statusHistory already built by caller (preserves flagged history on resubmit)
+    final pending = post.copyWith(
       id: docId,
       status: ComplaintStatus.pendingReview,
-      updatedAt: DateTime.now(),
-      statusHistory: [
-        StatusHistoryEntry(
-          status: ComplaintStatus.pendingReview,
-          changedAt: DateTime.now(),
-          changedBy: post.userName,
-          note: 'Issue submitted for review',
-        ),
-      ],
+      updatedAt: now,
     );
+    await _db.collection('complaints').doc(docId).set(pending.toFirestore());
 
-    await _db.collection('complaints').doc(docId).set(submitted.toFirestore());
+    // Step 2 — Run system moderation
+    final result = await ModerationService.instance.moderate(pending);
 
-    // Clean up draft if this was one
-    if (post.id != null) {
+    // Step 3 — Update based on result
+    final finalStatus =
+        result.approved ? ComplaintStatus.approved : ComplaintStatus.flagged;
+
+    final historyNote = result.autoPrivate
+        ? 'Auto-switched to Private due to sensitive content'
+        : result.approved
+            ? 'Automatically approved by system moderator'
+            : result.reason ?? 'Flagged by system moderator';
+
+    final updatedHistory = [
+      ...pending.statusHistory,
+      StatusHistoryEntry(
+        status: finalStatus,
+        changedAt: DateTime.now(),
+        changedBy: 'System Moderator',
+        note: historyNote,
+      ),
+    ];
+
+    await _db.collection('complaints').doc(docId).update({
+      'status': finalStatus.name,
+      'updatedAt': DateTime.now().toIso8601String(),
+      // Auto-private: force isPublic false
+      if (result.autoPrivate) 'isPublic': false,
+      if (result.autoPrivate) 'moderationNote': result.reason,
+      // Flagged: store rejection reason
+      if (!result.approved) 'moderationNote': result.reason,
+      if (!result.approved) 'rejectionCategory': result.category?.label,
+      'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
+      'assignedCommittee': _assignCommittee(post.category),
+    });
+
+    // Step 4 — Clean up draft
+    if (post.id != null && post.id!.startsWith('draft_')) {
       try { await _deleteDraft(post.id!); } catch (_) {}
     }
 
-    return docId;
+    return result;
+  }
+
+  // ── Auto Committee Assignment ─────────────────────────────────────────────
+
+  String _assignCommittee(ComplaintCategory category) {
+    switch (category) {
+      case ComplaintCategory.infrastructure: return 'IPDC';
+      case ComplaintCategory.academic:       return 'GARC';
+      case ComplaintCategory.library:        return 'KRRC';
+      default:                               return 'GARC';
+    }
   }
 
   // ── Drafts (SharedPreferences) ───────────────────────────────────────────
@@ -98,6 +142,14 @@ class PostService {
   }
 
   Future<void> deleteDraft(String draftId) => _deleteDraft(draftId);
+
+  // ── Delete submitted complaint ────────────────────────────────────────────
+
+  /// Permanently deletes a complaint from Firestore.
+  /// Only the complaint owner can call this (enforced by security rules).
+  Future<void> deleteComplaint(String complaintId) async {
+    await _db.collection('complaints').doc(complaintId).delete();
+  }
 
   // ── Feed query ────────────────────────────────────────────────────────────
 

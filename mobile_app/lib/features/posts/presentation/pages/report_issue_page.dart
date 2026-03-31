@@ -38,9 +38,11 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   final List<File> _selectedVideos = [];
   final List<VideoPlayerController?> _videoControllers = [];
   final List<bool> _videoInitializing = [];
+  // Cloudinary URLs from flagged/submitted complaints being edited
+  final List<String> _existingImageUrls = [];
 
   // Computed limits
-  int get _usedSlots => _selectedImages.length + _selectedVideos.length;
+  int get _usedSlots => _selectedImages.length + _selectedVideos.length + _existingImageUrls.length;
   int get _remainingSlots => _totalMediaSlots - _usedSlots;
   int get _maxMoreImages => _remainingSlots;
   int get _maxMoreVideos => _remainingSlots;
@@ -76,7 +78,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     _isOnCampus = draft.isOnCampus;
     _isPublic = draft.isPublic;
 
-    // Restore images if files still exist on device
+    // Restore local images if files still exist on device
     for (final path in draft.localImagePaths) {
       final file = File(path);
       if (file.existsSync()) {
@@ -95,8 +97,15 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         _initVideoController(index, file);
       }
     }
-    // Note: media files may not restore if Android cleared the temp cache.
-    // A warning banner is shown in that case.
+
+    // For flagged/submitted complaints being edited:
+    // imageUrls are Cloudinary URLs — carry them forward so they aren't lost
+    // They will be reused on resubmit (already uploaded, no re-upload needed)
+    if (draft.imageUrls.isNotEmpty && _selectedImages.isEmpty) {
+      // imageUrls exist but no local files — populate _existingImageUrls
+      // so they show in UI and get passed through on submit
+      _existingImageUrls.addAll(draft.imageUrls);
+    }
   }
 
   Future<void> _initVideoController(int index, File file) async {
@@ -332,15 +341,17 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       final now = DateTime.now();
       final docId = DateTime.now().millisecondsSinceEpoch.toString();
 
-      // Save images
-      List<String> imagePaths = [];
+      // Upload any new images picked by user
+      List<String> newImagePaths = [];
       if (_selectedImages.isNotEmpty) {
-        imagePaths = await StorageService.instance.uploadComplaintImages(
+        newImagePaths = await StorageService.instance.uploadComplaintImages(
           userId: user.uid,
           complaintId: docId,
           files: _selectedImages,
         );
       }
+      // Merge existing Cloudinary URLs (from flagged edit) with new uploads
+      final List<String> imagePaths = [..._existingImageUrls, ...newImagePaths];
 
       // Save all videos
       List<String> videoPaths = [];
@@ -374,16 +385,40 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         status: ComplaintStatus.pendingReview,
         createdAt: widget.existingDraft?.createdAt ?? now,
         updatedAt: now,
+        // Preserve history from flagged complaint + add resubmit entry
+        statusHistory: [
+          ...?widget.existingDraft?.statusHistory,
+          StatusHistoryEntry(
+            status: ComplaintStatus.pendingReview,
+            changedAt: now,
+            changedBy: user.displayName ?? '',
+            note: widget.existingDraft?.status == ComplaintStatus.flagged
+                ? 'Resubmitted after editing'
+                : 'Issue submitted — awaiting moderation',
+          ),
+        ],
       );
 
-      await PostService.instance.submitComplaint(
+      final result = await PostService.instance.submitComplaint(
         post: post,
-        imageFiles: [], // already saved above
+        imageFiles: [],
       );
 
       if (mounted) {
         draftRefreshNotifier.value++;
-        _showSnack('Complaint submitted successfully!', isSuccess: true);
+        if (result.autoPrivate) {
+          _showSnack(
+            'Submitted as Private — sensitive content auto-switched for your privacy.',
+            isSuccess: true,
+          );
+        } else if (result.approved) {
+          _showSnack('Complaint submitted and approved!', isSuccess: true);
+        } else {
+          _showSnack(
+            'Complaint flagged: ${result.reason}',
+            isSuccess: false,
+          );
+        }
         Navigator.of(context).pop(true);
       }
     } catch (e) {
@@ -465,11 +500,13 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   bool get _hasMissingDraftMedia {
     final draft = widget.existingDraft;
     if (draft == null) return false;
-    final draftImageCount = draft.localImagePaths.length;
+    // Count both local paths and cloud URLs
+    final draftImageCount =
+        draft.localImagePaths.length + draft.imageUrls.length;
     final draftVideoCount = draft.videoPaths.length;
     if (draftImageCount == 0 && draftVideoCount == 0) return false;
-    // If restored counts match draft counts, no media is missing
-    return _selectedImages.length < draftImageCount ||
+    final restoredImages = _selectedImages.length + _existingImageUrls.length;
+    return restoredImages < draftImageCount ||
         _selectedVideos.length < draftVideoCount;
   }
 
@@ -516,10 +553,9 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        final nav = Navigator.of(context);
         final shouldPop = await _onWillPop();
-        if (shouldPop && mounted) {
-          Navigator.of(context).pop();
-        }
+        if (shouldPop && mounted) nav.pop();
       },
       child: Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -531,8 +567,9 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
               color: Colors.white),
           onPressed: () async {
+            final nav = Navigator.of(context);
             final shouldPop = await _onWillPop();
-            if (shouldPop && mounted) Navigator.of(context).pop();
+            if (shouldPop && mounted) nav.pop();
           },
         ),
         title: Text(
@@ -998,6 +1035,56 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                         ],
                       ),
                     ),
+                  // Existing cloud images (from flagged complaint edit)
+                  if (_existingImageUrls.isNotEmpty) ...[
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _existingImageUrls.length,
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemBuilder: (ctx, i) => Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(
+                              _existingImageUrls[i],
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: Colors.grey.shade200,
+                                child: const Icon(Icons.broken_image),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: GestureDetector(
+                              onTap: () => setState(
+                                  () => _existingImageUrls.removeAt(i)),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close,
+                                    color: Colors.white, size: 14),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // New locally picked images
                   if (_selectedImages.isNotEmpty) ...[
                     GridView.builder(
                       shrinkWrap: true,

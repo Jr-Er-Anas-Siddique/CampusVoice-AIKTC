@@ -242,14 +242,7 @@ class _FeedPageState extends State<FeedPage> {
               StreamBuilder<List<PostModel>>(
                 stream: _feedStream,
                 builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const SliverFillRemaining(
-                      child: Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.accent),
-                      ),
-                    );
-                  }
+                  // Show error state
                   if (snap.hasError) {
                     return SliverFillRemaining(
                       child: _EmptyFeed(
@@ -259,7 +252,22 @@ class _FeedPageState extends State<FeedPage> {
                       ),
                     );
                   }
+
+                  // Show spinner ONLY on very first load (no data yet)
+                  if (!snap.hasData &&
+                      snap.connectionState == ConnectionState.waiting) {
+                    return const SliverFillRemaining(
+                      child: Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.accent),
+                      ),
+                    );
+                  }
+
+                  // Use current data or fall back to empty list
+                  // Never show a blank screen during stream updates
                   final posts = snap.data ?? [];
+
                   if (posts.isEmpty) {
                     return SliverFillRemaining(
                       child: _EmptyFeed(
@@ -277,11 +285,14 @@ class _FeedPageState extends State<FeedPage> {
                       ),
                     );
                   }
+
                   return SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (_, i) => Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                        child: ComplaintCard(post: posts[i]),
+                        child: RepaintBoundary(
+                          child: ComplaintCard(post: posts[i]),
+                        ),
                       ),
                       childCount: posts.length,
                     ),

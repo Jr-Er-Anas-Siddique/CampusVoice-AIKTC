@@ -100,6 +100,66 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
     }
   }
 
+  Future<void> _deleteComplaint(PostModel post) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Complaint',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+        content: const Text(
+            'This will permanently delete your complaint. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true && post.id != null) {
+      try {
+        await PostService.instance.deleteComplaint(post.id!);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Complaint deleted.'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not delete. Please try again.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _editAndResubmit(PostModel post) async {
+    // Convert the flagged complaint back to a draft-like model for editing
+    final asDraft = post.copyWith(status: ComplaintStatus.draft);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportIssuePage(existingDraft: asDraft),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = AuthService.instance.currentUser?.uid ?? '';
@@ -249,6 +309,12 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                                     builder: (_) => ComplaintDetailPage(
                                         post: complaints[i])),
                               ),
+                              onEdit: complaints[i].status == ComplaintStatus.flagged
+                                  ? () => _editAndResubmit(complaints[i])
+                                  : null,
+                              onDelete: complaints[i].status == ComplaintStatus.flagged
+                                  ? () => _deleteComplaint(complaints[i])
+                                  : null,
                             ),
                           ),
                   ),
@@ -301,7 +367,15 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
 class _ComplaintTile extends StatelessWidget {
   final PostModel post;
   final VoidCallback onTap;
-  const _ComplaintTile({required this.post, required this.onTap});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  const _ComplaintTile({
+    required this.post,
+    required this.onTap,
+    this.onEdit,
+    this.onDelete,
+  });
 
   Color _statusColor(ComplaintStatus s) {
     switch (s) {
@@ -457,6 +531,82 @@ class _ComplaintTile extends StatelessWidget {
                         height: 1.4),
                   ),
                   const SizedBox(height: 10),
+
+                  // Rejection / flag reason banner
+                  if ((post.status == ComplaintStatus.flagged ||
+                          post.status == ComplaintStatus.rejected) &&
+                      post.moderationNote != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline_rounded,
+                              size: 14, color: Colors.red.shade600),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              post.moderationNote!,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red.shade700,
+                                  height: 1.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+
+                  // Edit & Resubmit / Delete for flagged complaints
+                  if (post.status == ComplaintStatus.flagged &&
+                      (onEdit != null || onDelete != null)) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        if (onEdit != null)
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: onEdit,
+                              icon: const Icon(Icons.edit_rounded, size: 14),
+                              label: const Text('Edit & Resubmit',
+                                  style: TextStyle(fontSize: 12)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF1A237E),
+                                side: const BorderSide(
+                                    color: Color(0xFF1A237E)),
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 8),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        if (onEdit != null && onDelete != null)
+                          const SizedBox(width: 8),
+                        if (onDelete != null)
+                          IconButton(
+                            onPressed: onDelete,
+                            icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 18),
+                            color: Colors.red.shade400,
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.red.shade50,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
 
                   // Footer — location + media + social counts
                   Row(
@@ -682,12 +832,10 @@ class _EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? action;
   const _EmptyState({
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.action,
   });
 
   @override
@@ -720,10 +868,6 @@ class _EmptyState extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style:
                     TextStyle(fontSize: 14, color: Colors.grey.shade500)),
-            if (action != null) ...[
-              const SizedBox(height: 24),
-              action!,
-            ],
           ],
         ),
       ),
