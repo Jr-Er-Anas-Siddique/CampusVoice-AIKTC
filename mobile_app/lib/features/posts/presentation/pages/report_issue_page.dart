@@ -12,6 +12,9 @@ import '../../../../config/campus_locations.dart';
 import '../../../../config/complaint_categories.dart';
 import '../../../../core/utils/campus_boundary.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../services/duplicate_detection_service.dart';
+import '../../../../services/social_service.dart';
+import '../../../feed/presentation/pages/complaint_detail_page.dart';
 import '../../../../main.dart' show draftRefreshNotifier;
 
 class ReportIssuePage extends StatefulWidget {
@@ -324,6 +327,35 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     return null;
   }
 
+  // ── Duplicate Detection ───────────────────────────────────────────────────
+
+  Future<_DuplicateChoice?> _showDuplicateDialog(PostModel duplicate) async {
+    return showDialog<_DuplicateChoice>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _DuplicateDialog(duplicate: duplicate),
+    );
+  }
+
+  Future<void> _supportExistingComplaint(
+      PostModel duplicate, String uid) async {
+    try {
+      await SocialService.instance.toggleSupport(
+        complaintId: duplicate.id!,
+        userId: uid,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You supported the existing complaint!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
   // ── Submit / Draft ────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
@@ -340,6 +372,33 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       final user = AuthService.instance.currentUser!;
       final now = DateTime.now();
       final docId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // ── Duplicate detection ─────────────────────────────────────────
+      // Check before uploading media — no wasted upload if user decides
+      // to support the existing complaint instead
+      final duplicate = await DuplicateDetectionService.instance.findSimilar(
+        building: _selectedBuilding!,
+        category: _selectedCategory!,
+        currentUserId: user.uid,
+      );
+
+      if (duplicate != null && mounted) {
+        setState(() => _isSubmitting = false);
+        final choice = await _showDuplicateDialog(duplicate);
+        if (!mounted) return;
+
+        if (choice == _DuplicateChoice.supportExisting) {
+          // Toggle support on the existing complaint
+          await _supportExistingComplaint(duplicate, user.uid);
+          if (mounted) Navigator.of(context).pop(true);
+          return;
+        } else if (choice == null) {
+          // User dismissed — do nothing
+          return;
+        }
+        // choice == _DuplicateChoice.submitAnyway — continue with submission
+        setState(() => _isSubmitting = true);
+      }
 
       // Upload any new images picked by user
       List<String> newImagePaths = [];
@@ -1683,6 +1742,233 @@ class _MediaSourceSheet extends StatelessWidget {
                   color: Color(0xFF1A237E)),
               title: Text(galleryLabel),
               onTap: onGallery,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Duplicate Choice ──────────────────────────────────────────────────────────
+
+enum _DuplicateChoice { supportExisting, submitAnyway }
+
+// ── Duplicate Dialog ──────────────────────────────────────────────────────────
+
+class _DuplicateDialog extends StatelessWidget {
+  final PostModel duplicate;
+  const _DuplicateDialog({required this.duplicate});
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  String _statusLabel(ComplaintStatus s) {
+    switch (s) {
+      case ComplaintStatus.approved:    return 'Approved';
+      case ComplaintStatus.underReview: return 'Under Review';
+      case ComplaintStatus.inProgress:  return 'In Progress';
+      default:                          return s.name;
+    }
+  }
+
+  Color _statusColor(ComplaintStatus s) {
+    switch (s) {
+      case ComplaintStatus.approved:    return Colors.blue;
+      case ComplaintStatus.underReview: return Colors.blueGrey;
+      case ComplaintStatus.inProgress:  return Colors.orange;
+      default:                          return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.warning_amber_rounded,
+                      color: Colors.orange.shade700, size: 22),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Similar Issue Found',
+                    style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A237E)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'A similar complaint already exists for this location.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F6FA),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFEEEFF4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title
+                  Text(
+                    duplicate.title,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1C1C2E)),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  // Description
+                  Text(
+                    duplicate.description,
+                    style: TextStyle(
+                        fontSize: 13, color: Colors.grey.shade600, height: 1.4),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 10),
+                  // Stats row
+                  Row(
+                    children: [
+                      // Status badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _statusColor(duplicate.status)
+                              .withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _statusLabel(duplicate.status),
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _statusColor(duplicate.status)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.thumb_up_outlined,
+                          size: 13, color: Colors.grey.shade500),
+                      const SizedBox(width: 3),
+                      Text('${duplicate.supportCount} supports',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500)),
+                      const Spacer(),
+                      Text(_timeAgo(duplicate.createdAt),
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade400)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // View full issue button
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ComplaintDetailPage(post: duplicate),
+                        ),
+                      );
+                    },
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.open_in_new_rounded,
+                            size: 13,
+                            color: const Color(0xFF1A237E)
+                                .withValues(alpha: 0.7)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'View Full Issue',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF1A237E)
+                                .withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Action buttons
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.of(context)
+                    .pop(_DuplicateChoice.supportExisting),
+                icon: const Icon(Icons.thumb_up_rounded, size: 16),
+                label: const Text('Support Existing Issue',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1A237E),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context)
+                    .pop(_DuplicateChoice.submitAnyway),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1A237E),
+                  side: const BorderSide(color: Color(0xFF1A237E)),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Submit New Issue Anyway',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: Text('Cancel',
+                    style: TextStyle(color: Colors.grey.shade500)),
+              ),
             ),
           ],
         ),
