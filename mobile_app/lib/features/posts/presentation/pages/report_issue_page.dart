@@ -1115,7 +1115,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                               fit: BoxFit.cover,
                               width: double.infinity,
                               height: double.infinity,
-                              errorBuilder: (_, __, ___) => Container(
+                              errorBuilder: (context, error, stackTrace) => Container(
                                 color: Colors.grey.shade200,
                                 child: const Icon(Icons.broken_image),
                               ),

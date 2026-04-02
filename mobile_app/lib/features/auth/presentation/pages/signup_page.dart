@@ -77,7 +77,9 @@ class _SignupPageState extends State<SignupPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
       backgroundColor: const Color(0xFFF5F7FF),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -94,6 +96,7 @@ class _SignupPageState extends State<SignupPage> {
           ),
         ),
       ),
+      ), // closes GestureDetector
     );
   }
 

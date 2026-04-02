@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:mobile_app/features/feed/presentation/pages/feed_page.dart';
 import '../../../../services/auth_service.dart';
 import 'signup_page.dart';
-// import 'package:firebase_auth/firebase_auth.dart';
 // import 'verify_email_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -68,7 +67,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
 
-    if (AuthService.instance.validateAiktcEmail(email) != null) {
+    if (!email.toLowerCase().endsWith('@aiktc.ac.in')) {
       setState(() {
         _errorMessage = 'Enter your AIKTC email above first.';
       });
@@ -99,7 +98,9 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
       backgroundColor: const Color(0xFFF5F7FF),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -116,6 +117,7 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
+      ), // closes GestureDetector
     );
   }
 
@@ -223,8 +225,14 @@ class _LoginPageState extends State<LoginPage> {
                 hint: 'e.g. 22bit@aiktc.ac.in',
                 icon: Icons.alternate_email_rounded,
               ),
-              validator: (v) =>
-                  AuthService.instance.validateAiktcEmail(v ?? ''),
+              validator: (v) {
+                final email = (v ?? '').trim().toLowerCase();
+                if (email.isEmpty) return 'Email is required.';
+                if (!email.endsWith('@aiktc.ac.in')) {
+                  return 'Use your AIKTC email (e.g. 22bit@aiktc.ac.in).';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 16),
 

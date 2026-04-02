@@ -300,7 +300,7 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                         : ListView.separated(
                             padding: const EdgeInsets.all(12),
                             itemCount: complaints.length,
-                            separatorBuilder: (_, _) =>
+                            separatorBuilder: (_, index) =>
                                 const SizedBox(height: 8),
                             itemBuilder: (_, i) => _ComplaintTile(
                               post: complaints[i],
@@ -340,7 +340,7 @@ class _MyComplaintsPageState extends State<MyComplaintsPage>
                       child: ListView.separated(
                         padding: const EdgeInsets.all(12),
                         itemCount: _drafts.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        separatorBuilder: (_, index) => const SizedBox(height: 8),
                         itemBuilder: (_, i) => _DraftTile(
                           draft: _drafts[i],
                           onEdit: () async {

@@ -10,6 +10,9 @@ import 'features/feed/presentation/pages/feed_page.dart';
 import 'features/feed/presentation/pages/my_complaints_page.dart';
 import 'features/posts/presentation/pages/report_issue_page.dart';
 import 'features/profile/presentation/pages/user_profile_page.dart';
+import 'features/committee/presentation/pages/committee_shell.dart';
+import 'services/committee_auth_service.dart';
+import 'models/committee_member_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -139,8 +142,67 @@ class AuthGate extends StatelessWidget {
           return const _SplashScreen();
         }
         if (snapshot.hasData && snapshot.data != null) {
+          return const _RoleRouter();
+        }
+        return const LoginPage();
+      },
+    );
+  }
+}
+
+// ── Role Router — checks Firestore to decide which shell to show ──────────────
+class _RoleRouter extends StatefulWidget {
+  const _RoleRouter();
+
+  @override
+  State<_RoleRouter> createState() => _RoleRouterState();
+}
+
+class _RoleRouterState extends State<_RoleRouter> {
+  late Future<UserRoleResult> _roleFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    _roleFuture = CommitteeAuthService.instance.resolveRole(email);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<UserRoleResult>(
+      future: _roleFuture,
+      builder: (context, snap) {
+        // Still loading
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const _SplashScreen();
+        }
+
+        // Error — fail safe to student shell if student email, else login
+        if (snap.hasError || !snap.hasData) {
+          final email =
+              FirebaseAuth.instance.currentUser?.email ?? '';
+          if (CommitteeAuthService.instance.isStudentEmail(email)) {
+            return const MainShell();
+          }
+          return const LoginPage();
+        }
+
+        final result = snap.data!;
+
+        if (result.role == UserRole.committee && result.member != null) {
+          return CommitteeShell(member: result.member!);
+        }
+
+        if (result.role == UserRole.student) {
           return const MainShell();
         }
+
+        // Blocked — sign out async then show login
+        // Use addPostFrameCallback to avoid setState during build
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          FirebaseAuth.instance.signOut();
+        });
         return const LoginPage();
       },
     );

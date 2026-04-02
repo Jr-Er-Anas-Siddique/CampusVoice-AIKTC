@@ -170,16 +170,18 @@ class AuthService {
   // ──────────────────────────────────────────────────────────────────────────
 
   /// Signs in with email and password.
-  ///
+  /// Accepts both student (22dco06@aiktc.ac.in) and
+  /// faculty/committee (firstname.lastname@aiktc.ac.in) email patterns.
   /// Throws [AuthException] on failure.
   Future<User> signIn({required String email, required String password}) async {
-    if (validateAiktcEmail(email) != null) {
+    final normalised = email.trim().toLowerCase();
+    if (!normalised.endsWith('@aiktc.ac.in')) {
       throw const AuthException('Only AIKTC institute emails are allowed.');
     }
 
     try {
       final credential = await _auth.signInWithEmailAndPassword(
-        email: email.trim().toLowerCase(),
+        email: normalised,
         password: password,
       );
       final user = credential.user!;

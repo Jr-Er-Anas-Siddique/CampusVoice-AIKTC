@@ -586,16 +586,34 @@ class ComplaintCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 5),
-                  // Description
-                  Text(
-                    post.description,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMid,
-                        height: 1.45),
-                  ),
+                  // Description with Read more
+                  Builder(builder: (context) {
+                    final isLong = post.description.length > 120;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          post.description,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textMid,
+                              height: 1.45),
+                        ),
+                        if (isLong) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Read more',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.accent,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ],
+                    );
+                  }),
                 ],
               ),
             ),
