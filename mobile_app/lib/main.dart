@@ -12,7 +12,6 @@ import 'features/posts/presentation/pages/report_issue_page.dart';
 import 'features/profile/presentation/pages/user_profile_page.dart';
 import 'features/committee/presentation/pages/committee_shell.dart';
 import 'services/committee_auth_service.dart';
-import 'models/committee_member_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

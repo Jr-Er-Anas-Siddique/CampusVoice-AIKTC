@@ -13,6 +13,7 @@ import '../../../../config/complaint_categories.dart';
 import '../../../../core/utils/campus_boundary.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/duplicate_detection_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../services/social_service.dart';
 import '../../../feed/presentation/pages/complaint_detail_page.dart';
 import '../../../../main.dart' show draftRefreshNotifier;
@@ -340,6 +341,27 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
   Future<void> _supportExistingComplaint(
       PostModel duplicate, String uid) async {
     try {
+      // Check if already supported — don't toggle off accidentally
+      final alreadySupported = await FirebaseFirestore.instance
+          .collection('complaints')
+          .doc(duplicate.id)
+          .collection('supporters')
+          .doc(uid)
+          .get()
+          .then((d) => d.exists);
+
+      if (alreadySupported) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You have already supported this complaint.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
       await SocialService.instance.toggleSupport(
         complaintId: duplicate.id!,
         userId: uid,
@@ -487,7 +509,9 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
     }
   }
 
-  Future<void> _saveDraft() async {
+  // popAfterSave=true  → called from Save button (needs to pop itself)
+  // popAfterSave=false → called from _onWillPop (PopScope handles the pop)
+  Future<void> _saveDraft({bool popAfterSave = true}) async {
     if (_selectedCategory == null &&
         _selectedBuilding == null &&
         _titleController.text.trim().isEmpty) {
@@ -526,7 +550,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       draftRefreshNotifier.value++;
       if (mounted) {
         _showSnack('Draft saved.', isSuccess: true);
-        Navigator.of(context).pop(true);
+        if (popAfterSave) Navigator.of(context).pop(true);
       }
     } catch (e) {
       setState(() => _errorMessage = e.toString());
@@ -598,7 +622,7 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
       ),
     );
     if (result == 'draft') {
-      await _saveDraft();
+      await _saveDraft(popAfterSave: false);
       return true;
     }
     return result == 'discard';

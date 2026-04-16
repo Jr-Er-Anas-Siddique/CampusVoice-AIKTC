@@ -7,6 +7,7 @@ import '../../../../models/comment_model.dart';
 import '../../../../services/social_service.dart';
 import '../../../../services/auth_service.dart';
 import 'feed_page.dart' show FeedMediaCarousel;
+import '../../../../services/pdf_service.dart';
 
 class ComplaintDetailPage extends StatefulWidget {
   final PostModel post;
@@ -17,12 +18,195 @@ class ComplaintDetailPage extends StatefulWidget {
 }
 
 class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
-  final _commentController = TextEditingController();
+  final TextEditingController _commentController = TextEditingController();
   bool _isSubmittingComment = false;
 
   String get _uid => AuthService.instance.currentUser?.uid ?? '';
   String get _userName =>
       AuthService.instance.currentUser?.displayName ?? 'Student';
+
+  // Fetches reporter details for PDF
+  Future<Map<String, String>> _getReporterDetails() async {
+    String name = AuthService.instance.currentUser?.displayName ?? 'Student';
+    String rollNo = (AuthService.instance.currentUser?.email ?? '').split('@').first.toUpperCase();
+    String dept = 'N/A';
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users').doc(_uid).get();
+      if (doc.exists) {
+        name = doc.data()?['fullName'] ?? name;
+        final tag = (doc.data()?['departmentTag'] ?? '').toString().toLowerCase();
+        const deptMap = {
+          'co': 'Computer Engineering', 'ce': 'Civil Engineering',
+          'me': 'Mechanical Engineering', 'ee': 'Electrical Engineering',
+          'it': 'Information Technology', 'ai': 'AI & Data Science',
+          'ds': 'Data Science', 'et': 'E&TC Engineering',
+          'bit': 'B.Sc. IT', 'bca': 'BCA',
+        };
+        dept = deptMap[tag] ?? tag.toUpperCase();
+      }
+    } catch (_) {}
+    return {'name': name, 'rollNo': rollNo, 'dept': dept};
+  }
+
+  void _showPdfGenerating() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Row(children: [
+        SizedBox(width: 16, height: 16,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+        SizedBox(width: 10),
+        Text('Generating PDF...'),
+      ]),
+      duration: Duration(seconds: 60),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // Called from "Download Complaint Log" — no Firestore update, just PDF
+  Future<void> _downloadPdf(PostModel post) async {
+    final details = await _getReporterDetails();
+    if (!mounted) return;
+    _showPdfGenerating();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await PdfService.instance.generateAndShare(
+        context: context,
+        post: post,
+        reporterName: details['name']!,
+        reporterRollNo: details['rollNo']!,
+        reporterDepartment: details['dept']!,
+      );
+      messenger.hideCurrentSnackBar();
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Failed to generate PDF: $e'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  // Called from "Challenge Resolution" — updates Firestore FIRST, then generates PDF
+  Future<void> _challengeResolution(PostModel post) async {
+    // Confirm dialog — use context before any await
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Challenge Resolution?',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+        content: const Text(
+          'This will mark the complaint as "Challenged" — visible to all students and the committee. '
+          'A PDF escalation document will be generated for you to present at the college office.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B35),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Challenge & Download PDF'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Capture messenger before any async gap
+    final messenger = ScaffoldMessenger.of(context);
+
+    final details = await _getReporterDetails();
+    if (!mounted) return;
+
+    _showPdfGenerating();
+
+    try {
+      final now = DateTime.now();
+      final newEntry = StatusHistoryEntry(
+        status: post.status,
+        changedAt: now,
+        changedBy: details['name']!,
+        note: 'Resolution challenged by student — escalated to college office',
+      );
+      final updatedHistory = [...post.statusHistory, newEntry];
+
+      await FirebaseFirestore.instance
+          .collection('complaints')
+          .doc(post.id)
+          .update({
+        'isChallenged': true,
+        'challengedAt': now.toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+        'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
+      });
+
+      final challengedPost = post.copyWith(
+        isChallenged: true,
+        challengedAt: now,
+        statusHistory: updatedHistory,
+      );
+
+      // context is safe here — PdfService only uses it to call Navigator.push
+      // which is guarded by mounted check before this point
+      if (!mounted) return;
+      await PdfService.instance.generateAndShare(
+        context: context,
+        post: challengedPost,
+        reporterName: details['name']!,
+        reporterRollNo: details['rollNo']!,
+        reporterDepartment: details['dept']!,
+      );
+
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Resolution challenged. PDF generated.'),
+        backgroundColor: Color(0xFFFF6B35),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Failed: $e'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  void _openFullscreenImage(BuildContext ctx, List<String> urls, int index) {
+    Navigator.of(ctx).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text('${index + 1} / ${urls.length}'),
+        ),
+        body: PageView.builder(
+          controller: PageController(initialPage: index),
+          itemCount: urls.length,
+          itemBuilder: (ctx, i) => InteractiveViewer(
+            child: Center(
+              child: Image.network(
+                urls[i],
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                errorBuilder: (c, e, s) =>
+                    const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
 
   @override
   void dispose() {
@@ -409,62 +593,287 @@ class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF1A237E))),
                           const SizedBox(height: 12),
-                          ...post.statusHistory.asMap().entries.map((entry) {
-                            final i = entry.key;
-                            final e = entry.value;
-                            final isLast =
-                                i == post.statusHistory.length - 1;
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Column(
-                                  children: [
+                          // Non-owners: hide flagged and pendingReview entries
+                          ...() {
+                            final isOwner = post.userId == _uid;
+                            final visible = post.statusHistory.where((e) {
+                              if (isOwner) return true;
+                              return e.status != ComplaintStatus.flagged &&
+                                     e.status != ComplaintStatus.pendingReview;
+                            }).toList();
+                            return visible.asMap().entries.map((entry) {
+                              final i = entry.key;
+                              final e = entry.value;
+                              final isLast = i == visible.length - 1;
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Column(children: [
                                     Container(
-                                      width: 12,
-                                      height: 12,
+                                      width: 12, height: 12,
                                       decoration: BoxDecoration(
                                         color: _statusColor(e.status),
                                         shape: BoxShape.circle,
                                       ),
                                     ),
                                     if (!isLast)
-                                      Container(
-                                          width: 2,
-                                          height: 36,
-                                          color: Colors.grey.shade200),
-                                  ],
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Padding(
-                                    padding: EdgeInsets.only(
-                                        bottom: isLast ? 0 : 12),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(_statusLabel(e.status),
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 14)),
-                                        if (e.note != null)
-                                          Text(e.note!,
-                                              style: TextStyle(
-                                                  fontSize: 13,
-                                                  color:
-                                                      Colors.grey.shade600)),
-                                        Text(_timeAgo(e.changedAt),
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                color:
-                                                    Colors.grey.shade400)),
-                                      ],
+                                      Container(width: 2, height: 36, color: Colors.grey.shade200),
+                                  ]),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(_statusLabel(e.status),
+                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                                          if (e.note != null)
+                                            Text(e.note!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                                          Text(_timeAgo(e.changedAt),
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+                                        ],
+                                      ),
                                     ),
                                   ),
+                                ],
+                              );
+                            }).toList();
+                          }(),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // ── Resolution Note + Images (shown when resolved) ──
+                  if (post.status == ComplaintStatus.resolved &&
+                      (post.resolutionNote != null || post.resolutionImages.isNotEmpty)) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(Icons.check_circle_rounded,
+                                  color: Colors.green.shade600, size: 16),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text('Resolution',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1A237E))),
+                          ]),
+                          if (post.resolutionNote != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.green.shade200),
+                              ),
+                              child: Text(post.resolutionNote!,
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.green.shade800,
+                                      height: 1.5)),
+                            ),
+                          ],
+                          if (post.resolutionImages.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Text('Evidence from Committee',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey.shade600)),
+                            const SizedBox(height: 8),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: post.resolutionImages.length,
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: post.resolutionImages.length == 1 ? 1 : 2,
+                                crossAxisSpacing: 6,
+                                mainAxisSpacing: 6,
+                                childAspectRatio: 1.2,
+                              ),
+                              itemBuilder: (ctx, i) => GestureDetector(
+                                onTap: () => _openFullscreenImage(
+                                    context, post.resolutionImages, i),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Stack(fit: StackFit.expand, children: [
+                                    Image.network(
+                                      post.resolutionImages[i],
+                                      fit: BoxFit.cover,
+                                      gaplessPlayback: true,
+                                      errorBuilder: (ctx, err, stack) => Container(
+                                        color: Colors.grey.shade100,
+                                        child: Icon(Icons.broken_image, color: Colors.grey.shade400),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 4, right: 4,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black45,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Icon(Icons.fullscreen_rounded,
+                                            color: Colors.white, size: 14),
+                                      ),
+                                    ),
+                                  ]),
                                 ),
-                              ],
-                            );
-                          }),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // ── Challenged Banner (visible to ALL students) ──────
+                  if (post.isChallenged) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      color: Colors.white,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFF9500), width: 1.5),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded,
+                                color: Color(0xFFFF9500), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Resolution Challenged',
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFFE65100))),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    post.challengedAt != null
+                                        ? 'The reporter has challenged this resolution and escalated to the college office.'
+                                        : 'The reporter has challenged this resolution.',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.orange.shade800,
+                                        height: 1.4),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // ── Escalation / PDF Section (owner only, resolved only) ──
+                  if (post.userId == _uid &&
+                      post.status == ComplaintStatus.resolved) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!post.isChallenged) ...[
+                            // Not yet challenged — show challenge button
+                            const Text('Not Satisfied with Resolution?',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1A237E))),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Challenge the resolution to escalate this issue. '
+                              'A PDF with the full complaint log will be generated '
+                              'for you to present at the college office.',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                  height: 1.4),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _challengeResolution(post),
+                                icon: const Icon(Icons.gavel_rounded, size: 18),
+                                label: const Text('Challenge Resolution'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFF6B35),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                ),
+                              ),
+                            ),
+                          ] else if (post.status == ComplaintStatus.resolved &&
+                              post.isChallenged) ...[
+                            // Already challenged — show status + re-download button
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF3E0),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(children: [
+                                const Icon(Icons.check_circle_outline_rounded,
+                                    color: Color(0xFFFF9500), size: 18),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'You have challenged this resolution. Present the PDF at the college office.',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFFE65100)),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _downloadPdf(post),
+                                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                                label: const Text('Re-download Escalation PDF'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFFFF6B35),
+                                  side: const BorderSide(color: Color(0xFFFF6B35)),
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -547,8 +956,10 @@ class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
             ),
           ),
 
-          // ── Comment input bar ──────────────────────────────────────────
-          Container(
+          // ── Comment input bar (hidden when resolved or rejected) ─────
+          if (post.status != ComplaintStatus.resolved &&
+              post.status != ComplaintStatus.rejected)
+            Container(
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.white,

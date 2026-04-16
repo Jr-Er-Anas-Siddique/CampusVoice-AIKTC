@@ -149,6 +149,10 @@ class PostModel {
   // Moderation
   final String? moderationNote;  // set by system moderator on flag/reject
   final String? resolutionNote;  // set by committee on resolve
+  final List<String> resolutionImages; // images attached by committee on resolve
+  final List<String> resolutionVideos; // videos attached by committee on resolve
+  final bool isChallenged;       // true when student challenged the resolution
+  final DateTime? challengedAt;  // when the challenge was filed
   final int occurrenceCount;     // how many times this issue was reported before
 
   const PostModel({
@@ -177,6 +181,10 @@ class PostModel {
     this.statusHistory = const [],
     this.moderationNote,
     this.resolutionNote,
+    this.resolutionImages = const [],
+    this.resolutionVideos = const [],
+    this.isChallenged = false,
+    this.challengedAt,
     this.occurrenceCount = 0,
   });
 
@@ -217,6 +225,10 @@ class PostModel {
     List<StatusHistoryEntry>? statusHistory,
     String? moderationNote,
     String? resolutionNote,
+    List<String>? resolutionImages,
+    List<String>? resolutionVideos,
+    bool? isChallenged,
+    DateTime? challengedAt,
     int? occurrenceCount,
   }) {
     return PostModel(
@@ -245,6 +257,10 @@ class PostModel {
       statusHistory: statusHistory ?? this.statusHistory,
       moderationNote: moderationNote ?? this.moderationNote,
       resolutionNote: resolutionNote ?? this.resolutionNote,
+      resolutionImages: resolutionImages ?? this.resolutionImages,
+      resolutionVideos: resolutionVideos ?? this.resolutionVideos,
+      isChallenged: isChallenged ?? this.isChallenged,
+      challengedAt: challengedAt ?? this.challengedAt,
       occurrenceCount: occurrenceCount ?? this.occurrenceCount,
     );
   }
@@ -278,6 +294,10 @@ class PostModel {
     if (assignedCommittee != null) map['assignedCommittee'] = assignedCommittee;
     if (moderationNote != null) map['moderationNote'] = moderationNote;
     if (resolutionNote != null) map['resolutionNote'] = resolutionNote;
+    if (resolutionImages.isNotEmpty) map['resolutionImages'] = resolutionImages;
+    if (resolutionVideos.isNotEmpty) map['resolutionVideos'] = resolutionVideos;
+    if (isChallenged) map['isChallenged'] = isChallenged;
+    if (challengedAt != null) map['challengedAt'] = challengedAt!.toIso8601String();
     if (occurrenceCount > 0) map['occurrenceCount'] = occurrenceCount;
 
     return map;
@@ -317,6 +337,10 @@ class PostModel {
       assignedCommittee: map['assignedCommittee'],
       moderationNote: map['moderationNote'],
       resolutionNote: map['resolutionNote'],
+      resolutionImages: List<String>.from(map['resolutionImages'] ?? []),
+      resolutionVideos: List<String>.from(map['resolutionVideos'] ?? []),
+      isChallenged: map['isChallenged'] ?? false,
+      challengedAt: map['challengedAt'] != null ? DateTime.parse(map['challengedAt']) : null,
       occurrenceCount: (map['occurrenceCount'] ?? 0) as int,
       statusHistory: (map['statusHistory'] as List<dynamic>? ?? [])
           .map((e) => StatusHistoryEntry.fromMap(Map<String, dynamic>.from(e)))

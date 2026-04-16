@@ -99,6 +99,7 @@ class _LoginPageState extends State<LoginPage> {
     final theme = Theme.of(context);
 
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
       backgroundColor: const Color(0xFFF5F7FF),

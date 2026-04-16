@@ -462,8 +462,27 @@ class _ComplaintTile extends StatelessWidget {
                           color: color,
                           fontSize: 13,
                           fontWeight: FontWeight.w700)),
+                  if (post.isChallenged) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.gavel_rounded, size: 10, color: Color(0xFFFF6B35)),
+                        SizedBox(width: 3),
+                        Text('Challenged',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFFF6B35))),
+                      ]),
+                    ),
+                  ],
                   const Spacer(),
-                  Text(_timeAgo(post.createdAt),
+                  Text(_timeAgo(post.updatedAt),
                       style: TextStyle(
                           color: Colors.grey.shade500, fontSize: 12)),
                 ],
@@ -521,14 +540,17 @@ class _ComplaintTile extends StatelessWidget {
                         color: Color(0xFF1A237E)),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    post.description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                        height: 1.4),
+                  SizedBox(
+                    width: double.infinity,
+                    child: Text(
+                      post.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          height: 1.4),
+                    ),
                   ),
                   const SizedBox(height: 10),
 
@@ -765,23 +787,31 @@ class _DraftTile extends StatelessWidget {
                     ],
                   ),
                 const SizedBox(height: 4),
-                Text(
-                  draft.title.isEmpty ? 'Untitled draft' : draft.title,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A237E)),
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    draft.title.isEmpty ? 'Untitled draft' : draft.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A237E)),
+                  ),
                 ),
                 if (draft.description.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    draft.description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                        height: 1.4),
+                  SizedBox(
+                    width: double.infinity,
+                    child: Text(
+                      draft.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          height: 1.4),
+                    ),
                   ),
                 ],
                 const SizedBox(height: 12),
