@@ -214,7 +214,14 @@ class AuthService {
   // Sign Out
   // ──────────────────────────────────────────────────────────────────────────
 
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() async {
+    await _auth.signOut();
+    // Clear Firestore cache so next user gets fresh data, not stale cached queries
+    try {
+      await FirebaseFirestore.instance.terminate();
+      await FirebaseFirestore.instance.clearPersistence();
+    } catch (_) {}
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // Helpers

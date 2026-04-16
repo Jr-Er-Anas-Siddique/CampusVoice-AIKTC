@@ -159,7 +159,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
       ),
     );
     if (confirm == true) {
-      await FirebaseAuth.instance.signOut();
+      await AuthService.instance.signOut();
     }
   }
 
