@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../main.dart' show AppColors;
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../../../../models/post_model.dart';
+import '../../../../services/storage_service.dart';
+import '../../../feed/presentation/pages/feed_page.dart' show FullScreenMediaViewer, MediaItem, MediaType;
 import '../../../../models/comment_model.dart';
 import '../../../../models/committee_member_model.dart';
 
@@ -59,6 +63,9 @@ class _CommitteeComplaintDetailPageState
   }
 
   Future<void> _updateStatus(ComplaintStatus newStatus, String note) async {
+    // Capture context-dependent objects before any async gap
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
     setState(() => _isUpdating = true);
     try {
       final now = DateTime.now();
@@ -78,28 +85,26 @@ class _CommitteeComplaintDetailPageState
           .update({
         'status': newStatus.name,
         'updatedAt': now.toIso8601String(),
+        'isPublic': true,
         if (newStatus == ComplaintStatus.resolved ||
-            newStatus == ComplaintStatus.rejected)
+            newStatus == ComplaintStatus.rejected) ...{
           'resolutionNote': note,
+        },
         'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Status updated to ${_statusLabel(newStatus)}'),
-          backgroundColor: AppColors.resolved,
-          behavior: SnackBarBehavior.floating,
-        ));
-        Navigator.of(context).pop();
-      }
+      messenger.showSnackBar(SnackBar(
+        content: Text('Status updated to ${_statusLabel(newStatus)}'),
+        backgroundColor: AppColors.resolved,
+        behavior: SnackBarBehavior.floating,
+      ));
+      nav.pop();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed: $e'),
-          backgroundColor: AppColors.rejected,
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      messenger.showSnackBar(SnackBar(
+        content: Text('Failed: $e'),
+        backgroundColor: AppColors.rejected,
+        behavior: SnackBarBehavior.floating,
+      ));
     } finally {
       if (mounted) setState(() => _isUpdating = false);
     }
@@ -111,6 +116,58 @@ class _CommitteeComplaintDetailPageState
     required ComplaintStatus targetStatus,
   }) async {
     _noteController.clear();
+    if (targetStatus == ComplaintStatus.resolved) {
+      final result = await _showResolutionSheet();
+      if (result == null || !mounted) return;
+      setState(() => _isUpdating = true);
+      final note = result['note'] as String;
+      final imageFiles = result['images'] as List<File>;
+      try {
+        List<String> uploadedUrls = [];
+        if (imageFiles.isNotEmpty) {
+          uploadedUrls = await StorageService.instance.uploadComplaintImages(
+            userId: widget.post.userId,
+            complaintId: '${widget.post.id}_resolution',
+            files: imageFiles,
+          );
+        }
+        if (!mounted) return;
+        final now = DateTime.now();
+        final newEntry = StatusHistoryEntry(
+          status: ComplaintStatus.resolved,
+          changedAt: now,
+          changedBy: widget.member.name.isNotEmpty
+              ? widget.member.name
+              : widget.member.committee.label,
+          note: note,
+        );
+        final updatedHistory = [...widget.post.statusHistory, newEntry];
+        await FirebaseFirestore.instance
+            .collection('complaints')
+            .doc(widget.post.id)
+            .update({
+          'status': ComplaintStatus.resolved.name,
+          'updatedAt': now.toIso8601String(),
+          'isPublic': true,
+          'resolutionNote': note,
+          if (uploadedUrls.isNotEmpty) 'resolutionImages': uploadedUrls,
+          'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
+        });
+        if (!mounted) return;
+        setState(() => _isUpdating = false);
+        Navigator.of(context).pop();
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _isUpdating = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to resolve: $e'),
+          backgroundColor: AppColors.rejected,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    // Reject / other — simple dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -146,18 +203,228 @@ class _CommitteeComplaintDetailPageState
               Navigator.pop(context, true);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: targetStatus == ComplaintStatus.rejected
-                  ? AppColors.rejected
-                  : AppColors.primary,
+              backgroundColor: AppColors.rejected,
               foregroundColor: Colors.white,
             ),
-            child: Text(targetStatus == ComplaintStatus.resolved ? 'Mark Resolved' : 'Confirm'),
+            child: const Text('Confirm'),
           ),
         ],
       ),
     );
     if (confirmed == true) {
       await _updateStatus(targetStatus, _noteController.text.trim());
+    }
+  }
+
+  // ── Resolution Sheet (text + images) ─────────────────────────────────────
+
+  // Returns {note, images} or null if cancelled
+  Future<Map<String, dynamic>?> _showResolutionSheet() async {
+    final resolutionImages = <File>[];
+    final noteCtrl = TextEditingController();
+    final picker = ImagePicker();
+
+    final sheetResult = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          height: MediaQuery.of(context).size.height * 0.88,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              child: Row(children: [
+                const Text('Resolve Complaint',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const Spacer(),
+                IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(ctx)),
+              ]),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Resolution Message *',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Describe what was done to resolve this issue...',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.all(12),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.accent, width: 2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    const Text('Resolution Evidence',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
+                    const SizedBox(width: 6),
+                    Text('(optional · max 3)',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                  ]),
+                  const SizedBox(height: 10),
+                  if (resolutionImages.isNotEmpty) ...[
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: resolutionImages.length,
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6,
+                          childAspectRatio: 1),
+                      itemBuilder: (_, i) => Stack(children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(resolutionImages[i],
+                              fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                        ),
+                        Positioned(
+                          top: 2, right: 2,
+                          child: GestureDetector(
+                            onTap: () => setSheet(() => resolutionImages.removeAt(i)),
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                              child: const Icon(Icons.close_rounded, color: Colors.white, size: 12),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (resolutionImages.length < 3) ...[
+                    Row(children: [
+                      _AttachBtn(
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Camera',
+                        onTap: () async {
+                          final img = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+                          if (img != null) { setSheet(() => resolutionImages.add(File(img.path))); }
+                        },
+                      ),
+                      const SizedBox(width: 10),
+                      _AttachBtn(
+                        icon: Icons.photo_library_rounded,
+                        label: 'Gallery',
+                        onTap: () async {
+                          final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+                          if (img != null) { setSheet(() => resolutionImages.add(File(img.path))); }
+                        },
+                      ),
+                    ]),
+                  ],
+                ]),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final note = noteCtrl.text.trim();
+                    if (note.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Please write a resolution message'),
+                        behavior: SnackBarBehavior.floating,
+                      ));
+                      return;
+                    }
+                    // Pop sheet and return data — upload happens on page context
+                    Navigator.pop(ctx, {
+                      'note': note,
+                      'images': List<File>.from(resolutionImages),
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.resolved,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Mark as Resolved',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+    Future.microtask(() => noteCtrl.dispose());
+    return sheetResult; // null if dismissed without submitting
+  }
+
+  // Safe version that takes pre-captured messenger/nav to avoid
+  // "looking up deactivated widget's ancestor" crash
+  Future<void> _updateStatusWithMediaSafe(
+      ComplaintStatus newStatus, String note, List<String> resolutionImages,
+      ScaffoldMessengerState messenger, NavigatorState nav) async {
+    try {
+      await _updateStatusWithMedia(newStatus, note, resolutionImages, messenger, nav);
+    } catch (_) {}
+  }
+
+  Future<void> _updateStatusWithMedia(
+      ComplaintStatus newStatus, String note, List<String> resolutionImages,
+      [ScaffoldMessengerState? messengerOverride,
+       NavigatorState? navOverride]) async {
+    final messenger = messengerOverride ?? ScaffoldMessenger.of(context);
+    final nav = navOverride ?? Navigator.of(context);
+    try {
+      final now = DateTime.now();
+      final newEntry = StatusHistoryEntry(
+        status: newStatus,
+        changedAt: now,
+        changedBy: widget.member.name.isNotEmpty
+            ? widget.member.name
+            : widget.member.committee.label,
+        note: note,
+      );
+      final updatedHistory = [...widget.post.statusHistory, newEntry];
+      await FirebaseFirestore.instance
+          .collection('complaints')
+          .doc(widget.post.id)
+          .update({
+        'status': newStatus.name,
+        'updatedAt': now.toIso8601String(),
+        'isPublic': true,
+        'resolutionNote': note,
+        if (resolutionImages.isNotEmpty) 'resolutionImages': resolutionImages,
+        'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
+      });
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Complaint marked as resolved'),
+        backgroundColor: AppColors.resolved,
+        behavior: SnackBarBehavior.floating,
+      ));
+      nav.pop();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Failed: $e'),
+        backgroundColor: AppColors.rejected,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      if (mounted) setState(() => _isUpdating = false);
     }
   }
 
@@ -318,7 +585,13 @@ class _CommitteeComplaintDetailPageState
   Widget build(BuildContext context) {
     final post = widget.post;
 
-    return Scaffold(
+    return PopScope(
+      // Block back navigation while an update/upload is in progress
+      canPop: !_isUpdating,
+      onPopInvoked: (didPop) {
+        // If popped normally, nothing to do
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
@@ -346,6 +619,22 @@ class _CommitteeComplaintDetailPageState
                   Text(post.category.label,
                       style: const TextStyle(fontSize: 13, color: AppColors.accent, fontWeight: FontWeight.w600)),
                   const Spacer(),
+                  if (post.isChallenged) ...[
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.gavel_rounded, size: 11, color: Color(0xFFFF6B35)),
+                        SizedBox(width: 4),
+                        Text('Challenged',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFF6B35))),
+                      ]),
+                    ),
+                  ],
                   _StatusBadge(label: _statusLabel(post.status), color: _statusColor(post.status)),
                   if (!post.isPublic) ...[
                     const SizedBox(width: 6),
@@ -374,7 +663,7 @@ class _CommitteeComplaintDetailPageState
                   if (post.roomNumber != null) post.roomNumber!,
                 ].join(', ')),
                 const SizedBox(height: 4),
-                _InfoRow(icon: Icons.access_time_rounded, text: _timeAgo(post.createdAt)),
+                _InfoRow(icon: Icons.access_time_rounded, text: _timeAgo(post.updatedAt)),
                 const SizedBox(height: 4),
                 Row(children: [
                   _InfoRow(icon: Icons.thumb_up_outlined, text: '${post.supportCount} supports'),
@@ -434,11 +723,11 @@ class _CommitteeComplaintDetailPageState
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: post.imageUrls.length,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: post.imageUrls.length == 1 ? 1 : 2,
                           crossAxisSpacing: 8,
                           mainAxisSpacing: 8,
-                          childAspectRatio: 1.2),
+                          childAspectRatio: 0.85),
                       itemBuilder: (_, i) => GestureDetector(
                         onTap: () => _openFullscreenImage(context, post.imageUrls, i),
                         child: ClipRRect(
@@ -464,7 +753,23 @@ class _CommitteeComplaintDetailPageState
                   // Videos
                   ...post.videoPaths.map((path) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: _CommitteeVideoPlayer(path: path),
+                    child: _CommitteeVideoPlayer(
+                      path: path,
+                      onTapFullscreen: () {
+                        final items = [
+                          ...post.imageUrls.map((u) => MediaItem(url: u, type: MediaType.image)),
+                          ...post.videoPaths.map((v) => MediaItem(url: v, type: MediaType.video)),
+                        ];
+                        final videoIndex = post.imageUrls.length +
+                            post.videoPaths.indexOf(path);
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => FullScreenMediaViewer(
+                            items: items,
+                            initialIndex: videoIndex,
+                          ),
+                        ));
+                      },
+                    ),
                   )),
                 ],
               )),
@@ -510,6 +815,60 @@ class _CommitteeComplaintDetailPageState
               const SizedBox(height: 12),
             ],
 
+            // ── Resolution Evidence (images uploaded by committee) ───
+            if (post.resolutionImages.isNotEmpty) ...[
+              _SectionLabel('Resolution Evidence (${post.resolutionImages.length})'),
+              _Card(child: GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: post.resolutionImages.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: post.resolutionImages.length == 1 ? 1 : 2,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 1,
+                ),
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => _openFullscreenImage(
+                      context, post.resolutionImages, i),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(fit: StackFit.expand, children: [
+                      Image.network(
+                        post.resolutionImages[i],
+                        fit: BoxFit.cover,
+                        loadingBuilder: (ctx, child, progress) =>
+                          progress == null ? child : Container(
+                            color: Colors.grey.shade100,
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.grey)),
+                          ),
+                        errorBuilder: (c, e, s) => Container(
+                          color: Colors.grey.shade200,
+                          child: const Icon(Icons.broken_image_rounded,
+                              color: Colors.grey, size: 36),
+                        ),
+                      ),
+                      Positioned(
+                        top: 6, right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(Icons.fullscreen_rounded,
+                              color: Colors.white, size: 16),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+              )),
+              const SizedBox(height: 12),
+            ],
+
             // ── Actions ─────────────────────────────────────────────
             _SectionLabel('Actions'),
             _Card(child: _isUpdating
@@ -522,6 +881,7 @@ class _CommitteeComplaintDetailPageState
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -557,7 +917,8 @@ class _CommitteeComplaintDetailPageState
 
 class _CommitteeVideoPlayer extends StatefulWidget {
   final String path;
-  const _CommitteeVideoPlayer({required this.path});
+  final VoidCallback? onTapFullscreen;
+  const _CommitteeVideoPlayer({required this.path, this.onTapFullscreen});
 
   @override
   State<_CommitteeVideoPlayer> createState() => _CommitteeVideoPlayerState();
@@ -567,32 +928,69 @@ class _CommitteeVideoPlayerState extends State<_CommitteeVideoPlayer> {
   VideoPlayerController? _controller;
   bool _initializing = true;
   bool _error = false;
+  bool _isMuted = false;
+  bool _disposing = false;
+
+  // Listener to rebuild UI when video plays/pauses/progresses
+  void _onVideoUpdate() {
+    if (mounted && _controller != null) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _init(widget.path);
   }
 
-  Future<void> _init() async {
+  @override
+  void didUpdateWidget(_CommitteeVideoPlayer old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) {
+      final old = _controller;
+      _controller = null;
+      old?.pause();
+      Future.microtask(() => old?.dispose());
+      if (mounted) setState(() { _initializing = true; _error = false; });
+      _init(widget.path);
+    }
+  }
+
+  Future<void> _init(String path) async {
+    if (!path.startsWith('http')) {
+      if (mounted) setState(() { _initializing = false; _error = true; });
+      return;
+    }
+    VideoPlayerController? ctrl;
     try {
-      final path = widget.path;
-      // Only attempt network URLs — local paths will always fail on committee side
-      if (!path.startsWith('http')) {
-        if (mounted) setState(() { _initializing = false; _error = true; });
-        return;
-      }
-      _controller = VideoPlayerController.networkUrl(Uri.parse(path));
-      await _controller!.initialize();
-      if (mounted) setState(() => _initializing = false);
+      ctrl = VideoPlayerController.networkUrl(
+        Uri.parse(path),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
+      await ctrl.initialize();
+      if (_disposing || !mounted) { ctrl.dispose(); return; }
+      await ctrl.setLooping(false);
+      if (!mounted) { ctrl.dispose(); return; }
+      ctrl.addListener(_onVideoUpdate);
+      setState(() {
+        _controller = ctrl;
+        _initializing = false;
+      });
     } catch (_) {
+      ctrl?.dispose();
       if (mounted) setState(() { _initializing = false; _error = true; });
     }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _disposing = true;
+    final ctrl = _controller;
+    ctrl?.removeListener(_onVideoUpdate);  // remove listener FIRST
+    _controller = null;   // null field before dispose
+    ctrl?.pause();
+    // Microtask: VideoPlayer widget deactivates in same frame,
+    // disposing immediately causes _dependents.isEmpty assertion.
+    Future.microtask(() => ctrl?.dispose());
     super.dispose();
   }
 
@@ -622,10 +1020,6 @@ class _CommitteeVideoPlayerState extends State<_CommitteeVideoPlayer> {
       );
     }
 
-    final duration = _controller!.value.duration;
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds % 60;
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: Container(
@@ -640,30 +1034,59 @@ class _CommitteeVideoPlayerState extends State<_CommitteeVideoPlayer> {
               color: Colors.black87,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Row(children: [
-                ValueListenableBuilder(
-                  valueListenable: _controller!,
-                  builder: (_, value, __) => GestureDetector(
-                    onTap: () {
-                      if (value.isPlaying) {
-                        _controller!.pause();
-                      } else {
-                        _controller!.play();
-                      }
-                      setState(() {});
-                    },
-                    child: Icon(
-                      value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      color: Colors.white, size: 28,
-                    ),
+                GestureDetector(
+                  onTap: () {
+                    if (_controller?.value.isPlaying == true) {
+                      _controller?.pause();
+                    } else {
+                      _controller?.play();
+                    }
+                  },
+                  child: Icon(
+                    _controller?.value.isPlaying == true
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: Colors.white, size: 28,
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
+                Builder(builder: (ctx) {
+                    String fmtDur(Duration d) {
+                      final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+                      final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+                      return '$m:$s';
+                    }
+                    final pos = _controller?.value.position ?? Duration.zero;
+                    final dur = _controller?.value.duration ?? Duration.zero;
+                    return Text(
+                      '${fmtDur(pos)} / ${fmtDur(dur)}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    );
+                  }),
                 const Spacer(),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _isMuted = !_isMuted;
+                      _controller!.setVolume(_isMuted ? 0.0 : 1.0);
+                    });
+                  },
+                  child: Icon(
+                    _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    color: Colors.white70, size: 18),
+                ),
+                const SizedBox(width: 8),
                 const Icon(Icons.videocam_rounded, color: Colors.white54, size: 16),
+                if (widget.onTapFullscreen != null) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      _controller?.pause();
+                      widget.onTapFullscreen!();
+                    },
+                    child: const Icon(Icons.fullscreen_rounded, color: Colors.white70, size: 22),
+                  ),
+                ],
               ]),
             ),
           ],
@@ -761,14 +1184,6 @@ class _CommentsList extends StatelessWidget {
   final String postId;
   const _CommentsList({required this.postId});
 
-  String _timeAgo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1)  return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24)   return '${diff.inHours}h ago';
-    return '${dt.day}/${dt.month}/${dt.year}';
-  }
-
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
@@ -785,48 +1200,97 @@ class _CommentsList extends StatelessWidget {
             children: snap.data!.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
               final comment = CommentModel.fromFirestore(data, doc.id);
-              final rollNo = comment.userId.split('@').first.toUpperCase();
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 32, height: 32,
-                      decoration: const BoxDecoration(color: AppColors.accentLight, shape: BoxShape.circle),
-                      child: Center(
-                        child: Text(
-                          comment.userName.isNotEmpty ? comment.userName[0].toUpperCase() : 'S',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.accent),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Text(comment.userName,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textDark)),
-                          const SizedBox(width: 6),
-                          Text('($rollNo)',
-                              style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
-                          const Spacer(),
-                          Text(_timeAgo(comment.createdAt),
-                              style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
-                        ]),
-                        const SizedBox(height: 3),
-                        Text(comment.text,
-                            style: const TextStyle(fontSize: 13, color: AppColors.textMid, height: 1.4)),
-                      ],
-                    )),
-                  ],
-                ),
-              );
+              return _CommentTile(comment: comment);
             }).toList(),
           ),
         );
       },
+    );
+  }
+}
+
+class _CommentTile extends StatefulWidget {
+  final CommentModel comment;
+  const _CommentTile({required this.comment});
+  @override
+  State<_CommentTile> createState() => _CommentTileState();
+}
+
+class _CommentTileState extends State<_CommentTile> {
+  String _rollNo = '...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRollNo();
+  }
+
+  Future<void> _loadRollNo() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users').doc(widget.comment.userId).get();
+      if (doc.exists && mounted) {
+        final email = doc.data()?['email'] as String? ?? '';
+        setState(() => _rollNo = email.isNotEmpty
+            ? email.split('@').first.toUpperCase()
+            : widget.comment.userId.substring(0, 8).toUpperCase());
+      } else if (mounted) {
+        setState(() => _rollNo = widget.comment.userId.length >= 8
+            ? widget.comment.userId.substring(0, 8).toUpperCase()
+            : widget.comment.userId.toUpperCase());
+      }
+    } catch (_) {
+      if (mounted) setState(() => _rollNo = '');
+    }
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1)  return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24)   return '${diff.inHours}h ago';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final comment = widget.comment;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 32, height: 32,
+          decoration: const BoxDecoration(color: AppColors.accentLight, shape: BoxShape.circle),
+          child: Center(
+            child: Text(
+              comment.userName.isNotEmpty ? comment.userName[0].toUpperCase() : 'S',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.accent),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Flexible(child: Text(comment.userName,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                  overflow: TextOverflow.ellipsis)),
+              if (_rollNo.isNotEmpty) ...[
+                const SizedBox(width: 4),
+                Text('($_rollNo)',
+                    style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
+              ],
+              const Spacer(),
+              Text(_timeAgo(comment.createdAt),
+                  style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
+            ]),
+            const SizedBox(height: 3),
+            Text(comment.text,
+                style: const TextStyle(fontSize: 13, color: AppColors.textMid, height: 1.4)),
+          ],
+        )),
+      ]),
     );
   }
 }
@@ -861,8 +1325,9 @@ class _TimelineEntry extends StatelessWidget {
         padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: color)),
-          if (entry.note != null)
+          if (entry.note != null) ...[
             Text(entry.note!, style: const TextStyle(fontSize: 12, color: AppColors.textMid, height: 1.4)),
+          ],
           Text('by ${entry.changedBy} · ${_timeAgo(entry.changedAt)}',
               style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
         ]),
@@ -970,6 +1435,31 @@ class _ActionBtn extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 13),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 0,
+    ),
+  );
+}
+
+class _AttachBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _AttachBtn({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.accentLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: AppColors.accent),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 13, color: AppColors.accent, fontWeight: FontWeight.w500)),
+      ]),
     ),
   );
 }

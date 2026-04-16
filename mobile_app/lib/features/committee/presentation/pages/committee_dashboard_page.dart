@@ -57,92 +57,77 @@ class _CommitteeDashboardPageState extends State<CommitteeDashboardPage>
 
         return Scaffold(
           backgroundColor: const Color(0xFFF5F6FA),
-          body: NestedScrollView(
-            headerSliverBuilder: (context, _) => [
-              SliverAppBar(
-                pinned: true,
-                expandedHeight: 130,
-                backgroundColor: AppColors.primary,
-                automaticallyImplyLeading: false,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0xFF1A237E), Color(0xFF283593)],
-                      ),
-                    ),
-                    child: SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(widget.member.committee.label,
-                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-                              ),
-                            ]),
-                            const SizedBox(height: 8),
-                            const Text('Committee Dashboard',
-                                style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 4),
-                            Text(widget.member.committee.fullName,
-                                style: const TextStyle(color: Colors.white60, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+          body: Column(children: [
+            // ── Header ──────────────────────────────────────────────────
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF1A237E), Color(0xFF283593)],
                 ),
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(46),
-                  child: Container(
-                    color: AppColors.primary,
-                    child: TabBar(
-                      controller: _tabController,
-                      indicatorColor: Colors.white,
-                      indicatorWeight: 3,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white54,
-                      labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                      tabs: [
-                        _BadgeTab('New',      newList.length,      false),
-                        _BadgeTab('Active',   activeList.length,   false),
-                        _BadgeTab('Resolved', resolvedList.length, false),
-                        _BadgeTab('Flagged',  flaggedList.length,  true),
+              ),
+              child: SafeArea(
+                bottom: false,
+                child: Column(children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(widget.member.committee.label,
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text('Committee Dashboard',
+                            style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text(widget.member.committee.fullName,
+                            style: const TextStyle(color: Colors.white60, fontSize: 12)),
                       ],
                     ),
                   ),
+                  TabBar(
+                    controller: _tabController,
+                    indicatorColor: Colors.white,
+                    indicatorWeight: 3,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white54,
+                    labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    tabs: [
+                      _BadgeTab('New',      newList.length,      false),
+                      _BadgeTab('Active',   activeList.length,   false),
+                      _BadgeTab('Resolved', resolvedList.length, false),
+                      _BadgeTab('Flagged',  flaggedList.length,  true),
+                    ],
+                  ),
+                ]),
+              ),
+            ),
+            // ── Body ────────────────────────────────────────────────────
+            if (isLoading)
+              const Expanded(child: Center(child: CircularProgressIndicator(color: AppColors.accent)))
+            else ...[
+              _StatsRow(all: all),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _ComplaintList(complaints: newList,      emptyMsg: 'No new complaints',      member: widget.member),
+                    _ComplaintList(complaints: activeList,   emptyMsg: 'No active complaints',   member: widget.member),
+                    _ComplaintList(complaints: resolvedList, emptyMsg: 'No resolved complaints', member: widget.member),
+                    _ComplaintList(complaints: flaggedList,  emptyMsg: 'No flagged complaints',  member: widget.member),
+                  ],
                 ),
               ),
             ],
-            body: isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-                : Column(children: [
-                    // Stats row
-                    if (!isLoading) _StatsRow(all: all),
-                    // Tab content
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _ComplaintList(complaints: newList,      emptyMsg: 'No new complaints',     member: widget.member),
-                          _ComplaintList(complaints: activeList,   emptyMsg: 'No active complaints',  member: widget.member),
-                          _ComplaintList(complaints: resolvedList, emptyMsg: 'No resolved complaints', member: widget.member),
-                          _ComplaintList(complaints: flaggedList,  emptyMsg: 'No flagged complaints', member: widget.member),
-                        ],
-                      ),
-                    ),
-                  ]),
-          ),
+          ]),
         );
       },
     );
@@ -333,12 +318,28 @@ class _ComplaintCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(_label(post.status),
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                if (post.isChallenged) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.gavel_rounded, size: 9, color: Color(0xFFFF6B35)),
+                      const SizedBox(width: 3),
+                      const Text('Challenged',
+                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFFFF6B35))),
+                    ]),
+                  ),
+                ],
                 const Spacer(),
                 if (!post.isPublic) ...[
                   const Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textLight),
                   const SizedBox(width: 6),
                 ],
-                Text(_ago(post.createdAt),
+                Text(_ago(post.updatedAt),
                     style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
               ]),
             ),

@@ -1,6 +1,7 @@
 // lib/features/committee/presentation/pages/committee_profile_page.dart
 
 import 'package:flutter/material.dart';
+import '../../../../services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../main.dart' show AppColors;
 import '../../../../models/committee_member_model.dart';
@@ -31,7 +32,7 @@ class CommitteeProfilePage extends StatelessWidget {
         ],
       ),
     );
-    if (confirm == true) await FirebaseAuth.instance.signOut();
+    if (confirm == true) await AuthService.instance.signOut();
   }
 
   @override
