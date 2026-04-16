@@ -40,27 +40,43 @@ class _FeedPageState extends State<FeedPage> {
   }
 
   Stream<List<PostModel>> get _feedStream {
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+    // Query: isPublic == true, NO orderBy (avoids composite index requirement).
+    // Client-side: filter hidden statuses, filter resolved > 24h, sort by createdAt.
+    return FirebaseFirestore.instance
         .collection('complaints')
-        .where('status', isEqualTo: 'approved')
-        .orderBy('createdAt', descending: true);
-    if (_filterCategory != null) {
-      query = query.where('category', isEqualTo: _filterCategory!.name);
-    }
-    return query.snapshots().map((snap) {
+        .where('isPublic', isEqualTo: true)
+        .snapshots()
+        .map((snap) {
+      final now = DateTime.now();
       var posts = snap.docs
           .map((doc) => PostModel.fromFirestore(doc.data(), doc.id))
-          .where((p) => p.isPublic)
+          .where((p) {
+            // Hide statuses that should never appear in the feed
+            const hidden = {'draft', 'pendingReview', 'flagged', 'rejected'};
+            if (hidden.contains(p.status.name)) return false;
+            // Hide resolved posts older than 24 hours
+            if (p.status == ComplaintStatus.resolved) {
+              if (now.difference(p.updatedAt).inHours >= 24) return false;
+            }
+            // Category filter
+            if (_filterCategory != null && p.category != _filterCategory) return false;
+            return true;
+          })
           .toList();
+      // Search filter
       if (_searchQuery.isNotEmpty) {
         final q = _searchQuery.toLowerCase();
         posts = posts
-            .where((p) =>
-                p.title.toLowerCase().contains(q) ||
-                p.description.toLowerCase().contains(q) ||
-                p.building.toLowerCase().contains(q))
+            .where(
+              (p) =>
+                  p.title.toLowerCase().contains(q) ||
+                  p.description.toLowerCase().contains(q) ||
+                  p.building.toLowerCase().contains(q),
+            )
             .toList();
       }
+      // Sort newest first
+      posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return posts;
     });
   }
@@ -76,234 +92,259 @@ class _FeedPageState extends State<FeedPage> {
         onTap: () => FocusScope.of(context).unfocus(),
         behavior: HitTestBehavior.translucent,
         child: SafeArea(
-        child: RefreshIndicator(
-          color: AppColors.primary,
-          displacement: 20,
-          onRefresh: () async => setState(() {}),
-          child: CustomScrollView(
-            controller: _scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              // ── Sticky header ──────────────────────────────────────
-              SliverAppBar(
-                pinned: true,
-                floating: false,
-                backgroundColor: AppColors.surface,
-                elevation: _showElevation ? 2 : 0,
-                shadowColor: Colors.black12,
-                surfaceTintColor: Colors.transparent,
-                automaticallyImplyLeading: false,
-                titleSpacing: 0,
-                toolbarHeight: 64,
-                title: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      // Logo mark
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(10),
+          child: RefreshIndicator(
+            color: AppColors.primary,
+            displacement: 20,
+            onRefresh: () async => setState(() {}),
+            child: CustomScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                // ── Sticky header ──────────────────────────────────────
+                SliverAppBar(
+                  pinned: true,
+                  floating: false,
+                  backgroundColor: AppColors.surface,
+                  elevation: _showElevation ? 2 : 0,
+                  shadowColor: Colors.black12,
+                  surfaceTintColor: Colors.transparent,
+                  automaticallyImplyLeading: false,
+                  titleSpacing: 0,
+                  toolbarHeight: 64,
+                  title: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        // Logo mark
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.campaign_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
                         ),
-                        child: const Icon(Icons.campaign_rounded,
-                            color: Colors.white, size: 22),
-                      ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('CampusVoice',
-                              style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textDark,
-                                  height: 1.1)),
-                          Text('Hey $name 👋',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textMid,
-                                  height: 1.1)),
-                        ],
-                      ),
-                      const Spacer(),
-                      // Avatar
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: AppColors.accentLight,
-                        child: Text(
-                          name.isNotEmpty ? name[0].toUpperCase() : 'S',
-                          style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(1),
-                  child: Container(height: 1, color: AppColors.border),
-                ),
-              ),
-
-              // ── Search bar ─────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
-                  color: AppColors.surface,
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (v) => setState(() => _searchQuery = v.trim()),
-                    style: const TextStyle(
-                        fontSize: 14, color: AppColors.textDark),
-                    decoration: InputDecoration(
-                      hintText: 'Search complaints, locations...',
-                      hintStyle: const TextStyle(
-                          color: AppColors.textLight, fontSize: 14),
-                      prefixIcon: const Icon(Icons.search_rounded,
-                          color: AppColors.textLight, size: 20),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.close_rounded,
-                                  color: AppColors.textLight, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _searchQuery = '');
-                              },
-                            )
-                          : null,
-                      filled: true,
-                      fillColor: AppColors.background,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide:
-                            const BorderSide(color: AppColors.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(
-                            color: AppColors.accent, width: 1.5),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // ── Category filter chips ──────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
-                  color: AppColors.surface,
-                  child: Column(
-                    children: [
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: Row(
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            _CategoryChip(
-                              label: 'All',
-                              emoji: '📋',
-                              isSelected: _filterCategory == null,
-                              onTap: () =>
-                                  setState(() => _filterCategory = null),
+                            const Text(
+                              'CampusVoice',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textDark,
+                                height: 1.1,
+                              ),
                             ),
-                            ...ComplaintCategory.values.map(
-                              (cat) => _CategoryChip(
-                                label: cat.label,
-                                emoji: cat.icon,
-                                isSelected: _filterCategory == cat,
-                                onTap: () => setState(() =>
-                                    _filterCategory =
-                                        _filterCategory == cat ? null : cat),
+                            Text(
+                              'Hey $name 👋',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textMid,
+                                height: 1.1,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                      Container(height: 1, color: AppColors.border),
-                    ],
+                        const Spacer(),
+                        // Avatar
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: AppColors.accentLight,
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : 'S',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  bottom: PreferredSize(
+                    preferredSize: const Size.fromHeight(1),
+                    child: Container(height: 1, color: AppColors.border),
                   ),
                 ),
-              ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-              // ── Feed list ──────────────────────────────────────────
-              StreamBuilder<List<PostModel>>(
-                stream: _feedStream,
-                builder: (context, snap) {
-                  // Show error state
-                  if (snap.hasError) {
-                    return SliverFillRemaining(
-                      child: _EmptyFeed(
-                        icon: Icons.error_outline_rounded,
-                        title: 'Something went wrong',
-                        subtitle: snap.error.toString(),
+                // ── Search bar ─────────────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: AppColors.surface,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (v) => setState(() => _searchQuery = v.trim()),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textDark,
                       ),
-                    );
-                  }
-
-                  // Show spinner ONLY on very first load (no data yet)
-                  if (!snap.hasData &&
-                      snap.connectionState == ConnectionState.waiting) {
-                    return const SliverFillRemaining(
-                      child: Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.accent),
-                      ),
-                    );
-                  }
-
-                  // Use current data or fall back to empty list
-                  // Never show a blank screen during stream updates
-                  final posts = snap.data ?? [];
-
-                  if (posts.isEmpty) {
-                    return SliverFillRemaining(
-                      child: _EmptyFeed(
-                        icon: _searchQuery.isNotEmpty
-                            ? Icons.search_off_rounded
-                            : Icons.inbox_outlined,
-                        title: _searchQuery.isNotEmpty
-                            ? 'No results for "$_searchQuery"'
-                            : _filterCategory != null
-                                ? 'No ${_filterCategory!.label} complaints'
-                                : 'No complaints yet',
-                        subtitle: _searchQuery.isNotEmpty
-                            ? 'Try different keywords'
-                            : 'Be the first to report an issue on campus',
-                      ),
-                    );
-                  }
-
-                  return SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (_, i) => Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                        child: RepaintBoundary(
-                          child: ComplaintCard(post: posts[i]),
+                      decoration: InputDecoration(
+                        hintText: 'Search complaints, locations...',
+                        hintStyle: const TextStyle(
+                          color: AppColors.textLight,
+                          fontSize: 14,
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.search_rounded,
+                          color: AppColors.textLight,
+                          size: 20,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.close_rounded,
+                                  color: AppColors.textLight,
+                                  size: 18,
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: AppColors.background,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: AppColors.accent,
+                            width: 1.5,
+                          ),
                         ),
                       ),
-                      childCount: posts.length,
                     ),
-                  );
-                },
-              ),
+                  ),
+                ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 100)),
-            ],
+                // ── Category filter chips ──────────────────────────────
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: AppColors.surface,
+                    child: Column(
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                          child: Row(
+                            children: [
+                              _CategoryChip(
+                                label: 'All',
+                                emoji: '📋',
+                                isSelected: _filterCategory == null,
+                                onTap: () =>
+                                    setState(() => _filterCategory = null),
+                              ),
+                              ...ComplaintCategory.values.map(
+                                (cat) => _CategoryChip(
+                                  label: cat.label,
+                                  emoji: cat.icon,
+                                  isSelected: _filterCategory == cat,
+                                  onTap: () => setState(
+                                    () => _filterCategory =
+                                        _filterCategory == cat ? null : cat,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(height: 1, color: AppColors.border),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+                // ── Feed list ──────────────────────────────────────────
+                StreamBuilder<List<PostModel>>(
+                  stream: _feedStream,
+                  builder: (context, snap) {
+                    // Show error state
+                    if (snap.hasError) {
+                      return SliverFillRemaining(
+                        child: _EmptyFeed(
+                          icon: Icons.error_outline_rounded,
+                          title: 'Something went wrong',
+                          subtitle: snap.error.toString(),
+                        ),
+                      );
+                    }
+
+                    // Show spinner ONLY on very first load (no data yet)
+                    if (!snap.hasData &&
+                        snap.connectionState == ConnectionState.waiting) {
+                      return const SliverFillRemaining(
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.accent,
+                          ),
+                        ),
+                      );
+                    }
+
+                    // Use current data or fall back to empty list
+                    // Never show a blank screen during stream updates
+                    final posts = snap.data ?? [];
+
+                    if (posts.isEmpty) {
+                      return SliverFillRemaining(
+                        child: _EmptyFeed(
+                          icon: _searchQuery.isNotEmpty
+                              ? Icons.search_off_rounded
+                              : Icons.inbox_outlined,
+                          title: _searchQuery.isNotEmpty
+                              ? 'No results for "$_searchQuery"'
+                              : _filterCategory != null
+                              ? 'No ${_filterCategory!.label} complaints'
+                              : 'No complaints yet',
+                          subtitle: _searchQuery.isNotEmpty
+                              ? 'Try different keywords'
+                              : 'Be the first to report an issue on campus',
+                        ),
+                      );
+                    }
+
+                    return SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) => Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                          child: RepaintBoundary(
+                            child: ComplaintCard(post: posts[i]),
+                          ),
+                        ),
+                        childCount: posts.length,
+                      ),
+                    );
+                  },
+                ),
+
+                const SliverToBoxAdapter(child: SizedBox(height: 100)),
+              ],
+            ),
           ),
-        ),
         ), // closes GestureDetector
       ),
     );
@@ -361,8 +402,11 @@ class _CategoryChip extends StatelessWidget {
 class _EmptyFeed extends StatelessWidget {
   final IconData icon;
   final String title, subtitle;
-  const _EmptyFeed(
-      {required this.icon, required this.title, required this.subtitle});
+  const _EmptyFeed({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -379,24 +423,32 @@ class _EmptyFeed extends StatelessWidget {
                 color: AppColors.accentLight,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon,
-                  size: 44,
-                  color: AppColors.accent.withValues(alpha: 0.7)),
+              child: Icon(
+                icon,
+                size: 44,
+                color: AppColors.accent.withValues(alpha: 0.7),
+              ),
             ),
             const SizedBox(height: 20),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textDark)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textMid,
-                    height: 1.5)),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.textMid,
+                height: 1.5,
+              ),
+            ),
           ],
         ),
       ),
@@ -411,40 +463,64 @@ class ComplaintCard extends StatelessWidget {
 
   Color _statusColor(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.pendingReview: return AppColors.pending;
-      case ComplaintStatus.approved:      return AppColors.inProgress;
-      case ComplaintStatus.underReview:   return AppColors.inProgress;
-      case ComplaintStatus.inProgress:    return AppColors.inProgress;
-      case ComplaintStatus.resolved:      return AppColors.resolved;
-      case ComplaintStatus.rejected:      return AppColors.rejected;
-      case ComplaintStatus.flagged:       return AppColors.rejected;
-      default:                            return AppColors.textLight;
+      case ComplaintStatus.pendingReview:
+        return AppColors.pending;
+      case ComplaintStatus.approved:
+        return AppColors.inProgress;
+      case ComplaintStatus.underReview:
+        return AppColors.inProgress;
+      case ComplaintStatus.inProgress:
+        return AppColors.inProgress;
+      case ComplaintStatus.resolved:
+        return AppColors.resolved;
+      case ComplaintStatus.rejected:
+        return AppColors.rejected;
+      case ComplaintStatus.flagged:
+        return AppColors.rejected;
+      default:
+        return AppColors.textLight;
     }
   }
 
   Color _statusBg(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.pendingReview: return AppColors.orangeTint;
-      case ComplaintStatus.approved:      return AppColors.blueTint;
-      case ComplaintStatus.underReview:   return AppColors.blueTint;
-      case ComplaintStatus.inProgress:    return AppColors.blueTint;
-      case ComplaintStatus.resolved:      return AppColors.greenTint;
-      case ComplaintStatus.rejected:      return AppColors.redTint;
-      case ComplaintStatus.flagged:       return AppColors.redTint;
-      default:                            return AppColors.background;
+      case ComplaintStatus.pendingReview:
+        return AppColors.orangeTint;
+      case ComplaintStatus.approved:
+        return AppColors.blueTint;
+      case ComplaintStatus.underReview:
+        return AppColors.blueTint;
+      case ComplaintStatus.inProgress:
+        return AppColors.blueTint;
+      case ComplaintStatus.resolved:
+        return AppColors.greenTint;
+      case ComplaintStatus.rejected:
+        return AppColors.redTint;
+      case ComplaintStatus.flagged:
+        return AppColors.redTint;
+      default:
+        return AppColors.background;
     }
   }
 
   String _statusLabel(ComplaintStatus s) {
     switch (s) {
-      case ComplaintStatus.pendingReview: return 'Pending Review';
-      case ComplaintStatus.approved:      return 'Approved';
-      case ComplaintStatus.underReview:   return 'Under Review';
-      case ComplaintStatus.inProgress:    return 'In Progress';
-      case ComplaintStatus.resolved:      return 'Resolved';
-      case ComplaintStatus.rejected:      return 'Rejected';
-      case ComplaintStatus.flagged:       return 'Flagged';
-      default:                            return 'Unknown';
+      case ComplaintStatus.pendingReview:
+        return 'Pending Review';
+      case ComplaintStatus.approved:
+        return 'Approved';
+      case ComplaintStatus.underReview:
+        return 'Under Review';
+      case ComplaintStatus.inProgress:
+        return 'In Progress';
+      case ComplaintStatus.resolved:
+        return 'Resolved';
+      case ComplaintStatus.rejected:
+        return 'Rejected';
+      case ComplaintStatus.flagged:
+        return 'Flagged';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -463,8 +539,9 @@ class ComplaintCard extends StatelessWidget {
     final hasMedia = post.imageUrls.isNotEmpty || post.videoPaths.isNotEmpty;
 
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ComplaintDetailPage(post: post))),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ComplaintDetailPage(post: post)),
+      ),
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -480,7 +557,6 @@ class ComplaintCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
             // ── Header: avatar + name + time + status ────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
@@ -494,9 +570,10 @@ class ComplaintCard extends StatelessWidget {
                           ? post.userName[0].toUpperCase()
                           : 'S',
                       style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16),
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -504,42 +581,91 @@ class ComplaintCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(post.userName,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                                color: AppColors.textDark)),
+                        Text(
+                          post.userName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            color: AppColors.textDark,
+                          ),
+                        ),
                         Row(
                           children: [
-                            const Icon(Icons.location_on_outlined,
-                                size: 11, color: AppColors.textLight),
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: 11,
+                              color: AppColors.textLight,
+                            ),
                             const SizedBox(width: 2),
                             Text(
                               '${post.building}  ·  ${_timeAgo(post.createdAt)}',
                               style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.textLight),
+                                fontSize: 11,
+                                color: AppColors.textLight,
+                              ),
                             ),
                           ],
                         ),
                       ],
                     ),
                   ),
-                  // Status badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: _statusBg(post.status),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _statusLabel(post.status),
-                      style: TextStyle(
-                          color: _statusColor(post.status),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700),
-                    ),
+                  // Status badge + Challenged badge
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (post.isChallenged) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFFFF6B35,
+                            ).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.gavel_rounded,
+                                size: 10,
+                                color: Color(0xFFFF6B35),
+                              ),
+                              const SizedBox(width: 3),
+                              const Text(
+                                'Challenged',
+                                style: TextStyle(
+                                  color: Color(0xFFFF6B35),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                      ],
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _statusBg(post.status),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _statusLabel(post.status),
+                          style: TextStyle(
+                            color: _statusColor(post.status),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -554,7 +680,9 @@ class ComplaintCard extends StatelessWidget {
                   // Category pill
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.accentLight,
                       borderRadius: BorderRadius.circular(6),
@@ -562,14 +690,19 @@ class ComplaintCard extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(post.category.icon,
-                            style: const TextStyle(fontSize: 11)),
+                        Text(
+                          post.category.icon,
+                          style: const TextStyle(fontSize: 11),
+                        ),
                         const SizedBox(width: 4),
-                        Text(post.category.label,
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.accent,
-                                fontWeight: FontWeight.w700)),
+                        Text(
+                          post.category.label,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.accent,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -578,42 +711,47 @@ class ComplaintCard extends StatelessWidget {
                   Text(
                     post.title,
                     style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textDark,
-                        height: 1.3),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                      height: 1.3,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 5),
                   // Description with Read more
-                  Builder(builder: (context) {
-                    final isLong = post.description.length > 120;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          post.description,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                  Builder(
+                    builder: (context) {
+                      final isLong = post.description.length > 120;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            post.description,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
                               fontSize: 13,
                               color: AppColors.textMid,
-                              height: 1.45),
-                        ),
-                        if (isLong) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            'Read more',
-                            style: TextStyle(
+                              height: 1.45,
+                            ),
+                          ),
+                          if (isLong) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              'Read more',
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AppColors.accent,
-                                fontWeight: FontWeight.w600),
-                          ),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    );
-                  }),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -629,10 +767,12 @@ class ComplaintCard extends StatelessWidget {
 
             // ── Divider ───────────────────────────────────────────
             Padding(
-              padding: EdgeInsets.symmetric(
-                  horizontal: hasMedia ? 0 : 14),
+              padding: EdgeInsets.symmetric(horizontal: hasMedia ? 0 : 14),
               child: const Divider(
-                  height: 20, thickness: 0.5, color: AppColors.border),
+                height: 20,
+                thickness: 0.5,
+                color: AppColors.border,
+              ),
             ),
 
             // ── Action bar ────────────────────────────────────────
@@ -652,11 +792,15 @@ class ComplaintCard extends StatelessWidget {
                       final supported = snap.data?.exists ?? false;
                       return GestureDetector(
                         onTap: () => SocialService.instance.toggleSupport(
-                            complaintId: post.id!, userId: uid),
+                          complaintId: post.id!,
+                          userId: uid,
+                        ),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
                           decoration: BoxDecoration(
                             color: supported
                                 ? AppColors.accentLight
@@ -685,25 +829,29 @@ class ComplaintCard extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 5),
-                              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                              StreamBuilder<
+                                DocumentSnapshot<Map<String, dynamic>>
+                              >(
                                 stream: FirebaseFirestore.instance
                                     .collection('complaints')
                                     .doc(post.id)
                                     .snapshots(),
                                 builder: (context, countSnap) {
                                   final count = countSnap.hasData
-                                      ? ((countSnap.data!.data()?[
-                                                  'supportCount'] ??
-                                              post.supportCount) as int)
+                                      ? ((countSnap.data!
+                                                    .data()?['supportCount'] ??
+                                                post.supportCount)
+                                            as int)
                                       : post.supportCount;
                                   return Text(
                                     '$count Support${count == 1 ? '' : 's'}',
                                     style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: supported
-                                            ? AppColors.accent
-                                            : AppColors.textLight),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: supported
+                                          ? AppColors.accent
+                                          : AppColors.textLight,
+                                    ),
                                   );
                                 },
                               ),
@@ -725,11 +873,14 @@ class ComplaintCard extends StatelessWidget {
                     builder: (context, snap) {
                       final count = snap.hasData
                           ? ((snap.data!.data()?['commentCount'] ??
-                              post.commentCount) as int)
+                                    post.commentCount)
+                                as int)
                           : post.commentCount;
                       return Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.background,
                           borderRadius: BorderRadius.circular(20),
@@ -739,15 +890,19 @@ class ComplaintCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(
-                                Icons.chat_bubble_outline_rounded,
-                                size: 15,
-                                color: AppColors.textLight),
+                              Icons.chat_bubble_outline_rounded,
+                              size: 15,
+                              color: AppColors.textLight,
+                            ),
                             const SizedBox(width: 5),
-                            Text('$count',
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textLight)),
+                            Text(
+                              '$count',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textLight,
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -760,7 +915,9 @@ class ComplaintCard extends StatelessWidget {
                   if (post.isOnCampus == true)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 5),
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.greenTint,
                         borderRadius: BorderRadius.circular(10),
@@ -768,14 +925,20 @@ class ComplaintCard extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.verified_rounded,
-                              size: 12, color: AppColors.resolved),
+                          Icon(
+                            Icons.verified_rounded,
+                            size: 12,
+                            color: AppColors.resolved,
+                          ),
                           const SizedBox(width: 3),
-                          Text('Verified',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.resolved,
-                                  fontWeight: FontWeight.w600)),
+                          Text(
+                            'Verified',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.resolved,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -803,8 +966,11 @@ class MediaItem {
 class FeedMediaCarousel extends StatefulWidget {
   final List<String> imageUrls;
   final List<String> videoPaths;
-  const FeedMediaCarousel(
-      {super.key, required this.imageUrls, required this.videoPaths});
+  const FeedMediaCarousel({
+    super.key,
+    required this.imageUrls,
+    required this.videoPaths,
+  });
 
   @override
   State<FeedMediaCarousel> createState() => _FeedMediaCarouselState();
@@ -814,19 +980,17 @@ class _FeedMediaCarouselState extends State<FeedMediaCarousel> {
   int _current = 0;
 
   List<MediaItem> get _items => [
-        ...widget.imageUrls
-            .map((u) => MediaItem(url: u, type: MediaType.image)),
-        ...widget.videoPaths
-            .map((p) => MediaItem(url: p, type: MediaType.video)),
-      ];
+    ...widget.imageUrls.map((u) => MediaItem(url: u, type: MediaType.image)),
+    ...widget.videoPaths.map((p) => MediaItem(url: p, type: MediaType.video)),
+  ];
 
   void _openFullscreen(int index) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => FullScreenMediaViewer(
-        items: _items,
-        initialIndex: index,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            FullScreenMediaViewer(items: _items, initialIndex: index),
       ),
-    ));
+    );
   }
 
   @override
@@ -838,18 +1002,45 @@ class _FeedMediaCarouselState extends State<FeedMediaCarousel> {
       children: [
         SizedBox(
           height: 220,
-          child: PageView.builder(
-            itemCount: items.length,
-            onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (_, i) {
-              final item = items[i];
-              return item.type == MediaType.image
-                  ? _CarouselImage(
-                      url: item.url, onTap: () => _openFullscreen(i))
-                  : _CarouselVideo(
-                      path: item.url,
-                      onTapFullscreen: () => _openFullscreen(i));
-            },
+          child: Stack(
+            children: [
+              PageView.builder(
+                itemCount: items.length,
+                onPageChanged: (i) => setState(() => _current = i),
+                itemBuilder: (_, i) {
+                  final item = items[i];
+                  return item.type == MediaType.image
+                      ? _CarouselImage(
+                          url: item.url,
+                          onTap: () => _openFullscreen(i),
+                        )
+                      : _CarouselVideo(
+                          path: item.url,
+                          onTapFullscreen: () => _openFullscreen(i),
+                        );
+                },
+              ),
+              if (items.length > 1)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_current + 1} / ${items.length}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         if (items.length > 1) ...[
@@ -864,9 +1055,7 @@ class _FeedMediaCarouselState extends State<FeedMediaCarousel> {
                 width: _current == i ? 16 : 6,
                 height: 6,
                 decoration: BoxDecoration(
-                  color: _current == i
-                      ? AppColors.accent
-                      : AppColors.border,
+                  color: _current == i ? AppColors.accent : AppColors.border,
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -879,31 +1068,52 @@ class _FeedMediaCarouselState extends State<FeedMediaCarousel> {
 }
 
 // ── Carousel Image ────────────────────────────────────────────────────────────
-class _CarouselImage extends StatelessWidget {
+class _CarouselImage extends StatefulWidget {
   final String url;
   final VoidCallback onTap;
   const _CarouselImage({required this.url, required this.onTap});
 
   @override
+  State<_CarouselImage> createState() => _CarouselImageState();
+}
+
+class _CarouselImageState extends State<_CarouselImage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(url,
-              fit: BoxFit.cover,
-              loadingBuilder: (_, child, progress) => progress == null
-                  ? child
-                  : Container(
-                      color: AppColors.border,
-                      child: const Center(
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: AppColors.accent))),
-              errorBuilder: (_, _, _) => Container(
-                  color: AppColors.border,
-                  child: const Icon(Icons.broken_image,
-                      size: 48, color: AppColors.textLight))),
+          Image.network(
+            widget.url,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            loadingBuilder: (_, child, progress) => progress == null
+                ? child
+                : Container(
+                    color: AppColors.border,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.accent,
+                      ),
+                    ),
+                  ),
+            errorBuilder: (ctx, err, stack) => Container(
+              color: AppColors.border,
+              child: const Icon(
+                Icons.broken_image,
+                size: 48,
+                color: AppColors.textLight,
+              ),
+            ),
+          ),
           Positioned(
             top: 8,
             right: 8,
@@ -913,8 +1123,11 @@ class _CarouselImage extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.45),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.zoom_out_map_rounded,
-                  color: Colors.white, size: 14),
+              child: const Icon(
+                Icons.zoom_out_map_rounded,
+                color: Colors.white,
+                size: 14,
+              ),
             ),
           ),
         ],
@@ -927,8 +1140,7 @@ class _CarouselImage extends StatelessWidget {
 class _CarouselVideo extends StatefulWidget {
   final String path;
   final VoidCallback onTapFullscreen;
-  const _CarouselVideo(
-      {required this.path, required this.onTapFullscreen});
+  const _CarouselVideo({required this.path, required this.onTapFullscreen});
 
   @override
   State<_CarouselVideo> createState() => _CarouselVideoState();
@@ -937,26 +1149,78 @@ class _CarouselVideo extends StatefulWidget {
 class _CarouselVideoState extends State<_CarouselVideo> {
   VideoPlayerController? _controller;
   bool _initialized = false;
+  bool _isMuted = false;
+  bool _disposing = false;
+
+  void _onVideoUpdate() {
+    if (mounted && _controller != null) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _init(widget.path);
   }
 
-  Future<void> _init() async {
-    final ctrl = widget.path.startsWith('http')
-        ? VideoPlayerController.networkUrl(Uri.parse(widget.path))
-        : VideoPlayerController.file(File(widget.path));
-    _controller = ctrl;
-    await ctrl.initialize();
-    await ctrl.seekTo(Duration.zero);
-    if (mounted) setState(() => _initialized = true);
+  @override
+  void didUpdateWidget(_CarouselVideo old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) {
+      final old = _controller;
+      _controller = null;
+      old?.pause();
+      Future.microtask(() => old?.dispose());
+      if (mounted) setState(() => _initialized = false);
+      _init(widget.path);
+    }
+  }
+
+  Future<void> _init(String path) async {
+    // Create controller locally — do NOT assign to _controller yet
+    VideoPlayerController? ctrl;
+    try {
+      ctrl = path.startsWith('http')
+          ? VideoPlayerController.networkUrl(
+              Uri.parse(path),
+              videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            )
+          : VideoPlayerController.file(
+              File(path),
+              videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            );
+      await ctrl.initialize();
+      if (_disposing || !mounted) {
+        // Widget was disposed while we were awaiting — discard
+        ctrl.dispose();
+        return;
+      }
+      await ctrl.setLooping(false);
+      await ctrl.seekTo(Duration.zero);
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      ctrl.addListener(_onVideoUpdate);
+      setState(() {
+        _controller = ctrl;
+        _initialized = true;
+      });
+    } catch (_) {
+      ctrl?.dispose();
+      if (mounted) setState(() => _initialized = false);
+    }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _disposing = true;
+    final ctrl = _controller;
+    ctrl?.removeListener(_onVideoUpdate);
+    _controller = null;
+    ctrl?.pause();
+    // Microtask: VideoPlayer widget deactivates in same frame,
+    // disposing immediately causes _dependents.isEmpty assertion.
+    Future.microtask(() => ctrl?.dispose());
     super.dispose();
   }
 
@@ -971,8 +1235,7 @@ class _CarouselVideoState extends State<_CarouselVideo> {
     return Container(
       color: Colors.black,
       child: !_initialized
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white))
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : Stack(
               fit: StackFit.expand,
               children: [
@@ -984,91 +1247,132 @@ class _CarouselVideoState extends State<_CarouselVideo> {
                     child: VideoPlayer(_controller!),
                   ),
                 ),
-                ValueListenableBuilder(
-                  valueListenable: _controller!,
-                  builder: (_, v, _) => GestureDetector(
-                    onTap: () => setState(() => v.isPlaying
-                        ? _controller!.pause()
-                        : _controller!.play()),
-                    child: AnimatedOpacity(
-                      opacity: v.isPlaying ? 0.0 : 1.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Container(
-                        color: Colors.transparent,
-                        child: Center(
-                          child: Container(
-                            width: 52,
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.6),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.play_arrow_rounded,
-                                color: Colors.white, size: 30),
+                GestureDetector(
+                  onTap: () {
+                    if (_controller?.value.isPlaying == true) {
+                      _controller?.pause();
+                    } else {
+                      _controller?.play();
+                    }
+                  },
+                  child: AnimatedOpacity(
+                    opacity: _controller?.value.isPlaying == true ? 0.0 : 1.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      color: Colors.transparent,
+                      child: Center(
+                        child: Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 30,
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-                if (_initialized)
+                if (_initialized) ...[
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.videocam_rounded,
-                              color: Colors.white, size: 12),
-                          const SizedBox(width: 3),
-                          Text(
-                            _fmt(_controller!.value.duration),
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Mute button
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _isMuted = !_isMuted;
+                              _controller!.setVolume(_isMuted ? 0.0 : 1.0);
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _isMuted
+                                  ? Icons.volume_off_rounded
+                                  : Icons.volume_up_rounded,
+                              color: Colors.white,
+                              size: 14,
+                            ),
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.65),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.videocam_rounded,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '${_fmt(_controller?.value.position ?? Duration.zero)} / '
+                                '${_fmt(_controller?.value.duration ?? Duration.zero)}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 28,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () {
+                        _controller?.pause();
+                        widget.onTapFullscreen();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: const Icon(
+                          Icons.fullscreen_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                       ),
                     ),
                   ),
-                Positioned(
-                  bottom: 28,
-                  right: 8,
-                  child: GestureDetector(
-                    onTap: () {
-                      _controller?.pause();
-                      widget.onTapFullscreen();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(5),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      child: const Icon(Icons.fullscreen_rounded,
-                          color: Colors.white, size: 18),
+                  Positioned(
+                    bottom: 6,
+                    left: 8,
+                    right: 8,
+                    child: _ManualProgressBar(
+                      controller: _controller!,
                     ),
                   ),
-                ),
-                Positioned(
-                  bottom: 6,
-                  left: 8,
-                  right: 8,
-                  child: VideoProgressIndicator(_controller!,
-                      allowScrubbing: true,
-                      colors: const VideoProgressColors(
-                          playedColor: AppColors.accent,
-                          bufferedColor: Colors.white38,
-                          backgroundColor: Colors.white12)),
-                ),
+                ],
               ],
             ),
     );
@@ -1079,12 +1383,14 @@ class _CarouselVideoState extends State<_CarouselVideo> {
 class FullScreenMediaViewer extends StatefulWidget {
   final List<MediaItem> items;
   final int initialIndex;
-  const FullScreenMediaViewer(
-      {super.key, required this.items, required this.initialIndex});
+  const FullScreenMediaViewer({
+    super.key,
+    required this.items,
+    required this.initialIndex,
+  });
 
   @override
-  State<FullScreenMediaViewer> createState() =>
-      _FullScreenMediaViewerState();
+  State<FullScreenMediaViewer> createState() => _FullScreenMediaViewerState();
 }
 
 class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
@@ -1130,19 +1436,26 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
               child: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   child: Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.close_rounded,
-                            color: Colors.white, size: 28),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                       const Spacer(),
                       if (widget.items.length > 1)
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
+                            horizontal: 12,
+                            vertical: 5,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(20),
@@ -1150,9 +1463,10 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
                           child: Text(
                             '${_current + 1} / ${widget.items.length}',
                             style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600),
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       const SizedBox(width: 8),
@@ -1179,9 +1493,7 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
                         width: _current == i ? 20 : 6,
                         height: 6,
                         decoration: BoxDecoration(
-                          color: _current == i
-                              ? Colors.white
-                              : Colors.white38,
+                          color: _current == i ? Colors.white : Colors.white38,
                           borderRadius: BorderRadius.circular(3),
                         ),
                       ),
@@ -1202,22 +1514,22 @@ class _FullscreenImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InteractiveViewer(
-        minScale: 0.5,
-        maxScale: 5.0,
-        child: Center(
-          child: Image.network(url,
-              fit: BoxFit.contain,
-              loadingBuilder: (_, child, p) => p == null
-                  ? child
-                  : const Center(
-                      child: CircularProgressIndicator(
-                          color: Colors.white)),
-              errorBuilder: (_, _, _) => const Icon(
-                  Icons.broken_image,
-                  size: 64,
-                  color: Colors.white54)),
-        ),
-      );
+    minScale: 0.5,
+    maxScale: 5.0,
+    child: Center(
+      child: Image.network(
+        url,
+        fit: BoxFit.contain,
+        loadingBuilder: (_, child, p) => p == null
+            ? child
+            : const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+        errorBuilder: (_, _, _) =>
+            const Icon(Icons.broken_image, size: 64, color: Colors.white54),
+      ),
+    ),
+  );
 }
 
 class _FullscreenVideo extends StatefulWidget {
@@ -1231,26 +1543,72 @@ class _FullscreenVideo extends StatefulWidget {
 class _FullscreenVideoState extends State<_FullscreenVideo> {
   VideoPlayerController? _controller;
   bool _initialized = false;
+  bool _disposing = false;
+  bool _isMuted = false;
+
+  // addListener instead of ValueListenableBuilder avoids _dependents assertion
+  void _onVideoUpdate() {
+    if (mounted && _controller != null) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _init(widget.path);
   }
 
-  Future<void> _init() async {
-    final ctrl = widget.path.startsWith('http')
-        ? VideoPlayerController.networkUrl(Uri.parse(widget.path))
-        : VideoPlayerController.file(File(widget.path));
-    _controller = ctrl;
-    await ctrl.initialize();
-    await ctrl.play();
-    if (mounted) setState(() => _initialized = true);
+  @override
+  void didUpdateWidget(_FullscreenVideo old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) {
+      final prev = _controller;
+      prev?.removeListener(_onVideoUpdate);
+      _controller = null;
+      prev?.pause();
+      Future.microtask(() => prev?.dispose());
+      if (mounted) setState(() => _initialized = false);
+      _init(widget.path);
+    }
+  }
+
+  Future<void> _init(String path) async {
+    VideoPlayerController? ctrl;
+    try {
+      ctrl = path.startsWith('http')
+          ? VideoPlayerController.networkUrl(
+              Uri.parse(path),
+              videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            )
+          : VideoPlayerController.file(
+              File(path),
+              videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            );
+      await ctrl.initialize();
+      if (_disposing || !mounted) { ctrl.dispose(); return; }
+      await ctrl.setLooping(false);
+      await ctrl.play();
+      if (!mounted) { ctrl.dispose(); return; }
+      ctrl.addListener(_onVideoUpdate);
+      setState(() {
+        _controller = ctrl;
+        _initialized = true;
+      });
+    } catch (_) {
+      ctrl?.dispose();
+      if (mounted) setState(() => _initialized = false);
+    }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _disposing = true;
+    final ctrl = _controller;
+    ctrl?.removeListener(_onVideoUpdate);
+    _controller = null;
+    ctrl?.pause();
+    // Microtask: VideoPlayer widget deactivates in same frame,
+    // disposing immediately causes _dependents.isEmpty assertion.
+    Future.microtask(() => ctrl?.dispose());
     super.dispose();
   }
 
@@ -1263,8 +1621,7 @@ class _FullscreenVideoState extends State<_FullscreenVideo> {
   @override
   Widget build(BuildContext context) {
     if (!_initialized) {
-      return const Center(
-          child: CircularProgressIndicator(color: Colors.white));
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
     }
     return Stack(
       alignment: Alignment.center,
@@ -1275,23 +1632,29 @@ class _FullscreenVideoState extends State<_FullscreenVideo> {
             child: VideoPlayer(_controller!),
           ),
         ),
-        ValueListenableBuilder(
-          valueListenable: _controller!,
-          builder: (_, v, _) => GestureDetector(
-            onTap: () => setState(() =>
-                v.isPlaying ? _controller!.pause() : _controller!.play()),
-            child: AnimatedOpacity(
-              opacity: v.isPlaying ? 0.0 : 1.0,
-              duration: const Duration(milliseconds: 200),
-              child: Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.play_arrow_rounded,
-                    color: Colors.white, size: 44),
+        // Play/pause overlay — no VLB needed, _onVideoUpdate drives rebuild
+        GestureDetector(
+          onTap: () {
+            if (_controller?.value.isPlaying == true) {
+              _controller?.pause();
+            } else {
+              _controller?.play();
+            }
+          },
+          child: AnimatedOpacity(
+            opacity: _controller?.value.isPlaying == true ? 0.0 : 1.0,
+            duration: const Duration(milliseconds: 200),
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 44,
               ),
             ),
           ),
@@ -1302,31 +1665,105 @@ class _FullscreenVideoState extends State<_FullscreenVideo> {
           right: 16,
           child: Column(
             children: [
-              VideoProgressIndicator(_controller!,
-                  allowScrubbing: true,
-                  colors: const VideoProgressColors(
-                      playedColor: Colors.white,
-                      bufferedColor: Colors.white38,
-                      backgroundColor: Colors.white24)),
+              _ManualProgressBar(
+                controller: _controller!,
+                playedColor: Colors.white,
+                backgroundColor: Colors.white24,
+              ),
               const SizedBox(height: 6),
-              ValueListenableBuilder(
-                valueListenable: _controller!,
-                builder: (_, v, _) => Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_fmt(v.position),
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12)),
-                    Text(_fmt(v.duration),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12)),
-                  ],
-                ),
+              Row(
+                children: [
+                  Text(
+                    _fmt(_controller?.value.position ?? Duration.zero),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                  const Spacer(),
+                  Text(
+                    _fmt(_controller?.value.duration ?? Duration.zero),
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () => setState(() {
+                      _isMuted = !_isMuted;
+                      _controller?.setVolume(_isMuted ? 0.0 : 1.0);
+                    }),
+                    child: Icon(
+                      _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                      color: Colors.white70,
+                      size: 24,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Manual progress bar — no internal listener, driven by parent setState ───
+// VideoProgressIndicator holds its own addListener which causes
+// _dependents.isEmpty assertion on dispose. This widget avoids that.
+class _ManualProgressBar extends StatelessWidget {
+  final VideoPlayerController controller;
+  final Color playedColor;
+  final Color backgroundColor;
+  const _ManualProgressBar({
+    required this.controller,
+    this.playedColor = AppColors.accent,
+    this.backgroundColor = Colors.white12,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dur = controller.value.duration.inMilliseconds;
+    final pos = controller.value.position.inMilliseconds;
+    final progress = (dur > 0) ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+    return GestureDetector(
+      onHorizontalDragUpdate: (d) {
+        final box = context.findRenderObject() as RenderBox?;
+        if (box == null) return;
+        final frac = (d.localPosition.dx / box.size.width).clamp(0.0, 1.0);
+        controller.seekTo(Duration(
+          milliseconds: (dur * frac).round(),
+        ));
+      },
+      // Use LayoutBuilder so we know exact width for the filled portion
+      child: LayoutBuilder(
+        builder: (ctx, constraints) {
+          final totalWidth = constraints.maxWidth;
+          final filledWidth = totalWidth * progress;
+          return SizedBox(
+            height: 4,
+            width: totalWidth,
+            child: Stack(
+              children: [
+                // Background track
+                Container(
+                  width: totalWidth,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: backgroundColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Filled portion — grows strictly left to right
+                Container(
+                  width: filledWidth,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: playedColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }

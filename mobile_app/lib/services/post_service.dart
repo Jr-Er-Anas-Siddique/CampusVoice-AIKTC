@@ -153,22 +153,47 @@ class PostService {
 
   // ── Feed query ────────────────────────────────────────────────────────────
 
-  /// Returns a stream of approved public complaints ordered by newest first.
-  /// Only approved complaints (passed moderation) appear in the public feed.
+  // Statuses that are HIDDEN from public feed
+  static const Set<String> _hiddenStatuses = {
+    'draft', 'pendingReview', 'flagged', 'rejected',
+  };
+
+  /// Public feed stream.
+  ///
+  /// Strategy: query isPublic==true ordered by createdAt (simple index).
+  /// Client-side filters:
+  ///   • Remove draft/pending/flagged/rejected statuses
+  ///   • Remove resolved complaints older than 24 hours
+  ///     (students see resolution for 24h, then it leaves the feed)
   Stream<List<PostModel>> feedStream({ComplaintCategory? category}) {
+    // Query ONLY on isPublic == true with NO orderBy.
+    // A single equality filter needs NO composite index — works on any Firestore setup.
+    // Sorting and filtering done client-side to avoid all index issues.
     Query<Map<String, dynamic>> query = _db
         .collection('complaints')
-        .where('status', isEqualTo: 'approved')
-        .orderBy('createdAt', descending: true);
+        .where('isPublic', isEqualTo: true);
 
-    if (category != null) {
-      query = query.where('category', isEqualTo: category.name);
-    }
-
-    return query.snapshots().map((snap) => snap.docs
-        .map((doc) => PostModel.fromFirestore(doc.data(), doc.id))
-        .where((post) => post.isPublic)
-        .toList());
+    return query.snapshots().map((snap) {
+      final now = DateTime.now();
+      final posts = snap.docs
+          .map((doc) => PostModel.fromFirestore(doc.data(), doc.id))
+          .where((post) {
+            // Hide hidden statuses
+            if (_hiddenStatuses.contains(post.status.name)) return false;
+            // Hide resolved complaints after 24 hours
+            if (post.status == ComplaintStatus.resolved) {
+              final age = now.difference(post.updatedAt);
+              if (age.inHours >= 24) return false;
+            }
+            // Apply category filter client-side
+            if (category != null && post.category != category) return false;
+            return true;
+          })
+          .toList();
+      // Sort newest first client-side — no orderBy needed in Firestore
+      posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return posts;
+    });
   }
 
   // ── My Complaints ─────────────────────────────────────────────────────────
