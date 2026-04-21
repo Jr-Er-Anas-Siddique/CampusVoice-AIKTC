@@ -610,7 +610,10 @@ class ComplaintCard extends StatelessWidget {
                     ),
                   ),
                   // Status badge + Challenged badge
-                  Row(
+                  // Use Column so both badges stack vertically when present,
+                  // preventing horizontal overflow on narrow screens
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (post.isChallenged) ...[
@@ -645,7 +648,7 @@ class ComplaintCard extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(height: 4),
                       ],
                       Container(
                         padding: const EdgeInsets.symmetric(

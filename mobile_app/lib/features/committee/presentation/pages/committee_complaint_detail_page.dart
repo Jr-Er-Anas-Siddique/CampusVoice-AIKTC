@@ -98,7 +98,7 @@ class _CommitteeComplaintDetailPageState
         backgroundColor: AppColors.resolved,
         behavior: SnackBarBehavior.floating,
       ));
-      nav.pop();
+      if (mounted) nav.pop();
     } catch (e) {
       messenger.showSnackBar(SnackBar(
         content: Text('Failed: $e'),
@@ -155,12 +155,13 @@ class _CommitteeComplaintDetailPageState
         });
         if (!mounted) return;
         setState(() => _isUpdating = false);
-        Navigator.of(context).pop();
+        // Pop directly — noteCtrl dispose fix eliminates the animation crash
+        if (mounted) Navigator.of(context).pop();
       } catch (e) {
         if (!mounted) return;
         setState(() => _isUpdating = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to resolve: $e'),
+          content: Text('Failed to resolve: \$e'),
           backgroundColor: AppColors.rejected,
           behavior: SnackBarBehavior.floating,
         ));
@@ -218,169 +219,19 @@ class _CommitteeComplaintDetailPageState
 
   // ── Resolution Sheet (text + images) ─────────────────────────────────────
 
-  // Returns {note, images} or null if cancelled
+  // Returns {note, images} or null if cancelled.
+  // Uses a dedicated StatefulWidget so TextEditingController is owned
+  // by Flutter's widget lifecycle — dispose() only runs after the widget
+  // is fully removed from the tree, never during a closing animation.
   Future<Map<String, dynamic>?> _showResolutionSheet() async {
-    final resolutionImages = <File>[];
-    final noteCtrl = TextEditingController();
-    final picker = ImagePicker();
-
-    final sheetResult = await showModalBottomSheet<Map<String, dynamic>>(
+    return showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          height: MediaQuery.of(context).size.height * 0.88,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
-              child: Row(children: [
-                const Text('Resolve Complaint',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.primary)),
-                const Spacer(),
-                IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(ctx)),
-              ]),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Resolution Message *',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: noteCtrl,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: 'Describe what was done to resolve this issue...',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      contentPadding: const EdgeInsets.all(12),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: AppColors.accent, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(children: [
-                    const Text('Resolution Evidence',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
-                    const SizedBox(width: 6),
-                    Text('(optional · max 3)',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                  ]),
-                  const SizedBox(height: 10),
-                  if (resolutionImages.isNotEmpty) ...[
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: resolutionImages.length,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6,
-                          childAspectRatio: 1),
-                      itemBuilder: (_, i) => Stack(children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(resolutionImages[i],
-                              fit: BoxFit.cover, width: double.infinity, height: double.infinity),
-                        ),
-                        Positioned(
-                          top: 2, right: 2,
-                          child: GestureDetector(
-                            onTap: () => setSheet(() => resolutionImages.removeAt(i)),
-                            child: Container(
-                              padding: const EdgeInsets.all(3),
-                              decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                              child: const Icon(Icons.close_rounded, color: Colors.white, size: 12),
-                            ),
-                          ),
-                        ),
-                      ]),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (resolutionImages.length < 3) ...[
-                    Row(children: [
-                      _AttachBtn(
-                        icon: Icons.camera_alt_rounded,
-                        label: 'Camera',
-                        onTap: () async {
-                          final img = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
-                          if (img != null) { setSheet(() => resolutionImages.add(File(img.path))); }
-                        },
-                      ),
-                      const SizedBox(width: 10),
-                      _AttachBtn(
-                        icon: Icons.photo_library_rounded,
-                        label: 'Gallery',
-                        onTap: () async {
-                          final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-                          if (img != null) { setSheet(() => resolutionImages.add(File(img.path))); }
-                        },
-                      ),
-                    ]),
-                  ],
-                ]),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    final note = noteCtrl.text.trim();
-                    if (note.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Please write a resolution message'),
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                      return;
-                    }
-                    // Pop sheet and return data — upload happens on page context
-                    Navigator.pop(ctx, {
-                      'note': note,
-                      'images': List<File>.from(resolutionImages),
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.resolved,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 0,
-                  ),
-                  child: const Text('Mark as Resolved',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ),
-          ]),
-        ),
+      builder: (ctx) => _ResolutionSheet(
+        sheetHeight: MediaQuery.of(context).size.height * 0.88,
       ),
     );
-    Future.microtask(() => noteCtrl.dispose());
-    return sheetResult; // null if dismissed without submitting
-  }
-
-  // Safe version that takes pre-captured messenger/nav to avoid
-  // "looking up deactivated widget's ancestor" crash
-  Future<void> _updateStatusWithMediaSafe(
-      ComplaintStatus newStatus, String note, List<String> resolutionImages,
-      ScaffoldMessengerState messenger, NavigatorState nav) async {
-    try {
-      await _updateStatusWithMedia(newStatus, note, resolutionImages, messenger, nav);
-    } catch (_) {}
   }
 
   Future<void> _updateStatusWithMedia(
@@ -588,7 +439,7 @@ class _CommitteeComplaintDetailPageState
     return PopScope(
       // Block back navigation while an update/upload is in progress
       canPop: !_isUpdating,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         // If popped normally, nothing to do
       },
       child: Scaffold(
@@ -835,7 +686,7 @@ class _CommitteeComplaintDetailPageState
                     borderRadius: BorderRadius.circular(8),
                     child: Stack(fit: StackFit.expand, children: [
                       Image.network(
-                        post.resolutionImages[i],
+                        _cloudinaryOptimized(post.resolutionImages[i]),
                         fit: BoxFit.cover,
                         loadingBuilder: (ctx, child, progress) =>
                           progress == null ? child : Container(
@@ -887,28 +738,7 @@ class _CommitteeComplaintDetailPageState
 
   void _openFullscreenImage(BuildContext context, List<String> urls, int index) {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          title: Text('${index + 1} / ${urls.length}',
-              style: const TextStyle(color: Colors.white)),
-          leading: IconButton(
-            icon: const Icon(Icons.close_rounded, color: Colors.white),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
-        body: PageView.builder(
-          controller: PageController(initialPage: index),
-          itemCount: urls.length,
-          itemBuilder: (_, i) => Center(
-            child: InteractiveViewer(
-              child: Image.network(urls[i], fit: BoxFit.contain),
-            ),
-          ),
-        ),
-      ),
+      builder: (_) => _FullscreenImageViewer(urls: urls, initialIndex: index),
     ));
   }
 }
@@ -1462,4 +1292,262 @@ class _AttachBtn extends StatelessWidget {
       ]),
     ),
   );
+}
+
+// ── Resolution Sheet Widget ────────────────────────────────────────────────
+// Owns TextEditingController in State so Flutter disposes it correctly
+// after the widget is fully removed — never during a closing animation.
+class _ResolutionSheet extends StatefulWidget {
+  final double sheetHeight;
+  const _ResolutionSheet({required this.sheetHeight});
+
+  @override
+  State<_ResolutionSheet> createState() => _ResolutionSheetState();
+}
+
+class _ResolutionSheetState extends State<_ResolutionSheet> {
+  // Controller owned by State — disposed by Flutter lifecycle, not manually
+  final TextEditingController _noteCtrl = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+  final List<File> _images = [];
+
+  @override
+  void dispose() {
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: widget.sheetHeight,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(children: [
+        Container(
+          margin: const EdgeInsets.only(top: 12, bottom: 8),
+          width: 40, height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+          child: Row(children: [
+            const Text('Resolve Complaint',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.primary)),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(16, 16, 16,
+                MediaQuery.of(context).viewInsets.bottom + 16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Resolution Message *',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _noteCtrl,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: 'Describe what was done to resolve this issue...',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.all(12),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.accent, width: 2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(children: [
+                const Text('Resolution Evidence',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textMid)),
+                const SizedBox(width: 6),
+                Text('(optional · max 3)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+              ]),
+              const SizedBox(height: 10),
+              if (_images.isNotEmpty) ...[
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _images.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6,
+                      childAspectRatio: 1),
+                  itemBuilder: (_, i) => Stack(children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(_images[i],
+                          fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                    ),
+                    Positioned(
+                      top: 2, right: 2,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _images.removeAt(i)),
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                              color: Colors.black54, shape: BoxShape.circle),
+                          child: const Icon(Icons.close_rounded, color: Colors.white, size: 12),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (_images.length < 3) ...[
+                Row(children: [
+                  _AttachBtn(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Camera',
+                    onTap: () async {
+                      final img = await _picker.pickImage(
+                          source: ImageSource.camera, imageQuality: 80);
+                      if (img != null) setState(() => _images.add(File(img.path)));
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                  _AttachBtn(
+                    icon: Icons.photo_library_rounded,
+                    label: 'Gallery',
+                    onTap: () async {
+                      final img = await _picker.pickImage(
+                          source: ImageSource.gallery, imageQuality: 80);
+                      if (img != null) setState(() => _images.add(File(img.path)));
+                    },
+                  ),
+                ]),
+              ],
+            ]),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                final note = _noteCtrl.text.trim();
+                if (note.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Please write a resolution message'),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                  return;
+                }
+                // Dismiss keyboard before popping to prevent focus callbacks
+                // firing on a disposed controller
+                FocusScope.of(context).unfocus();
+                Navigator.pop(context, {
+                  'note': note,
+                  'images': List<File>.from(_images),
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.resolved,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              child: const Text('Mark as Resolved',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// Returns a Cloudinary URL with auto-optimization
+String _cloudinaryOptimized(String url, {int width = 600}) {
+  try {
+    final uploadIdx = url.indexOf('/upload/');
+    if (uploadIdx == -1) return url;
+    final insert = '/upload/w_$width,q_auto,f_auto';
+    return url.substring(0, uploadIdx) + insert + url.substring(uploadIdx + 7);
+  } catch (_) {
+    return url;
+  }
+}
+
+// ── Fullscreen Image Viewer ────────────────────────────────────────────────
+class _FullscreenImageViewer extends StatefulWidget {
+  final List<String> urls;
+  final int initialIndex;
+  const _FullscreenImageViewer({required this.urls, required this.initialIndex});
+
+  @override
+  State<_FullscreenImageViewer> createState() => _FullscreenImageViewerState();
+}
+
+class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
+  late int _currentIndex;
+  late PageController _pageCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageCtrl = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text('${_currentIndex + 1} / ${widget.urls.length}',
+            style: const TextStyle(color: Colors.white)),
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: PageView.builder(
+        controller: _pageCtrl,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _currentIndex = i),
+        itemBuilder: (_, i) => InteractiveViewer(
+          child: Center(
+            child: Image.network(
+              widget.urls[i],
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              loadingBuilder: (ctx, child, progress) {
+                if (progress == null) return child;
+                return const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white54, strokeWidth: 2),
+                );
+              },
+              errorBuilder: (c, e, s) =>
+                  const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

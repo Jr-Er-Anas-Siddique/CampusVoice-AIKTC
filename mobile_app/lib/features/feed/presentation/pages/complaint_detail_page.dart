@@ -8,6 +8,7 @@ import '../../../../services/social_service.dart';
 import '../../../../services/auth_service.dart';
 import 'feed_page.dart' show FeedMediaCarousel;
 import '../../../../services/pdf_service.dart';
+import '../../../../main.dart' show AppColors;
 
 class ComplaintDetailPage extends StatefulWidget {
   final PostModel post;
@@ -182,29 +183,7 @@ class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
 
   void _openFullscreenImage(BuildContext ctx, List<String> urls, int index) {
     Navigator.of(ctx).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          title: Text('${index + 1} / ${urls.length}'),
-        ),
-        body: PageView.builder(
-          controller: PageController(initialPage: index),
-          itemCount: urls.length,
-          itemBuilder: (ctx, i) => InteractiveViewer(
-            child: Center(
-              child: Image.network(
-                urls[i],
-                fit: BoxFit.contain,
-                gaplessPlayback: true,
-                errorBuilder: (c, e, s) =>
-                    const Icon(Icons.broken_image, color: Colors.white54, size: 64),
-              ),
-            ),
-          ),
-        ),
-      ),
+      builder: (_) => _FullscreenImageViewer(urls: urls, initialIndex: index),
     ));
   }
 
@@ -713,9 +692,25 @@ class _ComplaintDetailPageState extends State<ComplaintDetailPage> {
                                   borderRadius: BorderRadius.circular(8),
                                   child: Stack(fit: StackFit.expand, children: [
                                     Image.network(
-                                      post.resolutionImages[i],
+                                      _cloudinaryOptimized(post.resolutionImages[i]),
                                       fit: BoxFit.cover,
                                       gaplessPlayback: true,
+                                      loadingBuilder: (ctx, child, progress) {
+                                        if (progress == null) return child;
+                                        return Container(
+                                          color: Colors.grey.shade200,
+                                          child: Center(
+                                            child: CircularProgressIndicator(
+                                              value: progress.expectedTotalBytes != null
+                                                  ? progress.cumulativeBytesLoaded /
+                                                      progress.expectedTotalBytes!
+                                                  : null,
+                                              strokeWidth: 2,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                        );
+                                      },
                                       errorBuilder: (ctx, err, stack) => Container(
                                         color: Colors.grey.shade100,
                                         child: Icon(Icons.broken_image, color: Colors.grey.shade400),
@@ -1124,6 +1119,85 @@ class _CommentTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Returns a Cloudinary URL with auto-optimization (smaller size, faster load)
+String _cloudinaryOptimized(String url, {int width = 600}) {
+  try {
+    // Cloudinary URLs: .../upload/v.../...
+    // Insert transformation after /upload/
+    final uploadIdx = url.indexOf('/upload/');
+    if (uploadIdx == -1) return url;
+    final insert = '/upload/w_$width,q_auto,f_auto';
+    return url.substring(0, uploadIdx) + insert + url.substring(uploadIdx + 7);
+  } catch (_) {
+    return url;
+  }
+}
+
+// ── Fullscreen Image Viewer ────────────────────────────────────────────────
+// StatefulWidget so counter updates correctly when swiping between images
+class _FullscreenImageViewer extends StatefulWidget {
+  final List<String> urls;
+  final int initialIndex;
+  const _FullscreenImageViewer({required this.urls, required this.initialIndex});
+
+  @override
+  State<_FullscreenImageViewer> createState() => _FullscreenImageViewerState();
+}
+
+class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
+  late int _currentIndex;
+  late PageController _pageCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageCtrl = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        // Counter updates as user swipes
+        title: Text('${_currentIndex + 1} / ${widget.urls.length}'),
+      ),
+      body: PageView.builder(
+        controller: _pageCtrl,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _currentIndex = i),
+        itemBuilder: (ctx, i) => InteractiveViewer(
+          child: Center(
+            child: Image.network(
+              widget.urls[i],
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              loadingBuilder: (ctx, child, progress) {
+                if (progress == null) return child;
+                return const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white54, strokeWidth: 2),
+                );
+              },
+              errorBuilder: (c, e, s) =>
+                  const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+            ),
+          ),
+        ),
       ),
     );
   }
