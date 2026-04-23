@@ -234,50 +234,6 @@ class _CommitteeComplaintDetailPageState
     );
   }
 
-  Future<void> _updateStatusWithMedia(
-      ComplaintStatus newStatus, String note, List<String> resolutionImages,
-      [ScaffoldMessengerState? messengerOverride,
-       NavigatorState? navOverride]) async {
-    final messenger = messengerOverride ?? ScaffoldMessenger.of(context);
-    final nav = navOverride ?? Navigator.of(context);
-    try {
-      final now = DateTime.now();
-      final newEntry = StatusHistoryEntry(
-        status: newStatus,
-        changedAt: now,
-        changedBy: widget.member.name.isNotEmpty
-            ? widget.member.name
-            : widget.member.committee.label,
-        note: note,
-      );
-      final updatedHistory = [...widget.post.statusHistory, newEntry];
-      await FirebaseFirestore.instance
-          .collection('complaints')
-          .doc(widget.post.id)
-          .update({
-        'status': newStatus.name,
-        'updatedAt': now.toIso8601String(),
-        'isPublic': true,
-        'resolutionNote': note,
-        if (resolutionImages.isNotEmpty) 'resolutionImages': resolutionImages,
-        'statusHistory': updatedHistory.map((e) => e.toMap()).toList(),
-      });
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Complaint marked as resolved'),
-        backgroundColor: AppColors.resolved,
-        behavior: SnackBarBehavior.floating,
-      ));
-      nav.pop();
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(
-        content: Text('Failed: $e'),
-        backgroundColor: AppColors.rejected,
-        behavior: SnackBarBehavior.floating,
-      ));
-    } finally {
-      if (mounted) setState(() => _isUpdating = false);
-    }
-  }
 
   Widget _buildActionButtons() {
     final status = widget.post.status;

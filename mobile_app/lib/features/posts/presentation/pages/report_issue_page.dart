@@ -174,11 +174,37 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         setState(() => _gpsError = 'Location permission permanently denied.');
         return;
       }
-      final position = await Geolocator.getCurrentPosition(
+      // Wait for a GPS fix with accuracy <= 100m, timeout after 30 seconds.
+      // 50m was too strict for indoor use — phones inside buildings typically
+      // get 80–200m accuracy via cell tower/WiFi. 100m is a reasonable indoor
+      // threshold while still rejecting very bad cell-tower-only readings.
+      Position? bestPosition;
+      const maxAccuracy = 100.0;
+      const timeout = Duration(seconds: 30);
+      final deadline = DateTime.now().add(timeout);
+
+      await for (final pos in Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 0,
         ),
-      );
+      ).timeout(timeout, onTimeout: (sink) => sink.close())) {
+        // Track the most accurate reading seen so far (not just the first)
+        if (bestPosition == null || pos.accuracy < bestPosition.accuracy) {
+          bestPosition = pos;
+        }
+        if (pos.accuracy <= maxAccuracy) {
+          break; // good enough fix found
+        }
+        if (DateTime.now().isAfter(deadline)) break;
+      }
+
+      if (bestPosition == null) {
+        setState(() => _gpsError = 'Could not get GPS fix. Try outdoors.');
+        return;
+      }
+
+      final position = bestPosition;
       final coords = GpsCoordinates(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -191,7 +217,8 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
         _isOnCampus = onCampus;
         _gpsError = onCampus
             ? null
-            : 'You appear to be outside the campus boundary.';
+            : 'You appear to be outside the campus boundary. '
+              'Try moving near a window or outdoors for better GPS.';
       });
     } catch (e) {
       setState(() => _gpsError = 'Failed to get location: $e');
@@ -1017,6 +1044,19 @@ class _ReportIssuePageState extends State<ReportIssuePage> {
                                     style: TextStyle(
                                         fontSize: 11,
                                         color: Colors.grey.shade600),
+                                  ),
+                                  Text(
+                                    'Accuracy: ±${(_gpsCoordinates!.accuracy ?? 0).toStringAsFixed(0)}m'
+                                    '${(_gpsCoordinates!.accuracy ?? 0) > 100 ? ' (poor — try near a window)' : ''}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: (_gpsCoordinates!.accuracy ?? 0) <= 50
+                                          ? Colors.green.shade600
+                                          : (_gpsCoordinates!.accuracy ?? 0) <= 100
+                                              ? Colors.orange.shade700
+                                              : Colors.red.shade600,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ],
                               ),
