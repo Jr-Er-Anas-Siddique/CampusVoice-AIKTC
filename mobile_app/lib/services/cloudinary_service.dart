@@ -27,7 +27,7 @@ class CloudinaryService {
   static final CloudinaryService instance = CloudinaryService._();
 
   // ── REPLACE THIS with your Cloudinary cloud name ──────────────────────────
-  static const String _cloudName = 'dztcggsov';
+  static const String _cloudName = 'hello';
   static const String _uploadPreset = 'campusvoice'; // unsigned preset name
   // ─────────────────────────────────────────────────────────────────────────
 
